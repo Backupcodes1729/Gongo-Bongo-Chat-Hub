@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/hooks/useAuth";
-import { ArrowLeft, Paperclip, SendHorizonal, Smile, Mic, Phone, Video, Info, Loader2 } from "lucide-react";
+import { ArrowLeft, Paperclip, SendHorizonal, Smile, Mic, Phone, Video, Info, Loader2, Check } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useState, useEffect, useRef, FormEvent } from "react";
@@ -75,20 +75,16 @@ export default function IndividualChatPage() {
               setChatPartner(userSnap.data() as User);
             } else {
               console.warn("Chat partner user document not found:", partnerId);
-              setChatPartner(null); // Or handle as unknown user
+              setChatPartner(null); 
             }
           }
         } else if (chatData.isGroup) {
-          // For group chats, chatPartner might represent the group itself for display
-          // Or you might not set chatPartner and use chatDetails.groupName etc.
-          setChatPartner(null); // Reset for group chats
+          setChatPartner(null); 
         }
       } else {
         console.error("Chat not found!");
-        // Optionally redirect or show a "chat not found" message
         setChatDetails(null);
         setChatPartner(null);
-        // router.replace("/chat"); // Example redirect
       }
       setLoadingChat(false);
     }, (error) => {
@@ -129,7 +125,7 @@ export default function IndividualChatPage() {
       text: newMessage,
       senderId: currentUser.uid,
       timestamp: serverTimestamp(),
-      status: 'sent', // Initial status
+      status: 'sent', 
       senderPhotoURL: currentUser.photoURL || null,
       senderDisplayName: currentUser.displayName || currentUser.email || "User",
     };
@@ -138,7 +134,6 @@ export default function IndividualChatPage() {
       const messagesColRef = collection(db, "chats", chatId, "messages");
       await addDoc(messagesColRef, messageData);
 
-      // Update last message in the chat document
       const chatDocRef = doc(db, "chats", chatId);
       await updateDoc(chatDocRef, {
         lastMessage: {
@@ -147,15 +142,12 @@ export default function IndividualChatPage() {
           senderId: currentUser.uid,
         },
         updatedAt: serverTimestamp(),
-        // Ensure all participants are correctly in the participants array
-        // This can be useful if a user was removed and re-added, or for initial setup
         participants: arrayUnion(currentUser.uid) 
       });
 
       setNewMessage("");
     } catch (error) {
       console.error("Error sending message: ", error);
-      // Handle error (e.g., show a toast notification)
     } finally {
       setSendingMessage(false);
     }
@@ -191,7 +183,6 @@ export default function IndividualChatPage() {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* Chat Header */}
       <header className="flex items-center justify-between p-3 border-b bg-card shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/chat" className="md:hidden">
@@ -203,8 +194,8 @@ export default function IndividualChatPage() {
           {!partnerAvatar && <CustomAvatar fallback={partnerName?.charAt(0) || "?"} alt={partnerName || "Chat partner"} className="h-10 w-10" data-ai-hint={partnerDataAiHint} />}
           <div>
             <h2 className="font-semibold text-foreground">{partnerName || "Chat"}</h2>
-            {/* Add status later if available, e.g., for 1-on-1 chats */}
-            {/* <p className="text-xs text-muted-foreground">{chatPartner?.status || "Details"}</p> */}
+            {/* Online/Last Seen Status - Placeholder */}
+            {/* <p className="text-xs text-muted-foreground">Online</p> */}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -220,7 +211,6 @@ export default function IndividualChatPage() {
         </div>
       </header>
 
-      {/* Messages Area */}
       <ScrollArea className="flex-1 p-4" viewportRef={scrollAreaRef}>
         <div className="space-y-4">
           {messages.map((msg) => (
@@ -247,9 +237,21 @@ export default function IndividualChatPage() {
                 }`}
               >
                 <p className="text-sm">{msg.text}</p>
-                <p className={`text-xs mt-1 ${msg.senderId === currentUser?.uid ? 'text-primary-foreground/70 text-right' : 'text-muted-foreground text-right'}`}>
-                  {formatTimestamp(msg.timestamp)}
-                </p>
+                <div className="flex items-center justify-end gap-1 mt-1">
+                    <p className={`text-xs ${msg.senderId === currentUser?.uid ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                    {formatTimestamp(msg.timestamp)}
+                    </p>
+                    {msg.senderId === currentUser?.uid && msg.status === 'sent' && (
+                        <Check className="h-3.5 w-3.5 text-primary-foreground/70" />
+                    )}
+                    {/* Placeholder for other statuses */}
+                    {/* {msg.senderId === currentUser?.uid && msg.status === 'delivered' && (
+                        <Check className="h-3.5 w-3.5 text-blue-300" /> // Example: Delivered tick
+                    )}
+                    {msg.senderId === currentUser?.uid && msg.status === 'read' && (
+                        <Check className="h-3.5 w-3.5 text-green-300" /> // Example: Read tick
+                    )} */}
+                </div>
               </div>
               {msg.senderId === currentUser?.uid && currentUser?.photoURL && (
                   <CustomAvatar 
@@ -274,13 +276,6 @@ export default function IndividualChatPage() {
         </div>
       </ScrollArea>
       
-      {/* AI Suggestions (Placeholder - to be implemented later) */}
-      {/* <div className="p-2 border-t flex gap-2">
-        <Button variant="outline" size="sm" className="bg-accent/20 border-accent text-accent hover:bg-accent/30">Suggestion 1</Button>
-        <Button variant="outline" size="sm" className="bg-accent/20 border-accent text-accent hover:bg-accent/30">Suggestion 2</Button>
-      </div> */}
-
-      {/* Message Input */}
       <footer className="p-3 border-t bg-card">
         <form onSubmit={handleSendMessage} className="flex items-center gap-2">
           <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-primary">

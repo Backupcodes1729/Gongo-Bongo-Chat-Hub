@@ -6,6 +6,8 @@ export interface User extends FirebaseUser {
   lastLogin?: Timestamp;
   createdAt?: Timestamp;
   dataAiHint?: string; // Optional hint for AI image generation for user avatar
+  isOnline?: boolean;
+  lastSeen?: Timestamp;
 }
 
 export interface ChatMessage {
@@ -16,6 +18,8 @@ export interface ChatMessage {
   status: 'sent' | 'delivered' | 'read';
   isEdited?: boolean;
   replyTo?: string; // Message ID being replied to
+  repliedMessageText?: string; // Optional: Store a snippet of the replied message text
+  repliedMessageSender?: string; // Optional: Store the sender of the replied message
   senderPhotoURL?: string | null;
   senderDisplayName?: string | null;
 }
@@ -41,4 +45,7 @@ export interface Chat {
   adminIds?: string[];
   createdBy?: string; // UID of user who created the group chat
   createdAt?: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
+  // Optional: For unread counts, could be a map like { [userId]: count }
+  // unreadCounts?: { [key: string]: number }; 
 }
+
