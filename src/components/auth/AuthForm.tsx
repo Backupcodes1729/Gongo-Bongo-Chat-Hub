@@ -91,6 +91,7 @@ export function AuthForm() {
           displayName: data.displayName,
           // photoURL can be set here later if we allow avatar upload during signup
         });
+        await userCredential.user.reload(); // Force reload of user profile data
       }
       // The AuthProvider will handle Firestore document creation with the updated displayName
       toast({ title: "Success", description: "Account created successfully. Please log in." });
