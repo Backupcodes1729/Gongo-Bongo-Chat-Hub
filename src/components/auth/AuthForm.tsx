@@ -56,7 +56,7 @@ export function AuthForm() {
     try {
       await signInWithPopup(auth, googleProvider);
       toast({ title: "Success", description: "Signed in with Google successfully." });
-      router.push("/chat");
+      // Router push to /chat is handled by useEffect in login/signup pages or main layout
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -71,7 +71,7 @@ export function AuthForm() {
     try {
       await signInWithEmailAndPassword(auth, data.email, data.password);
       toast({ title: "Success", description: "Logged in successfully." });
-      router.push("/chat");
+      // Router push to /chat is handled by useEffect in login/signup pages or main layout
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -91,13 +91,14 @@ export function AuthForm() {
           displayName: data.displayName,
           // photoURL can be set here later if we allow avatar upload during signup
         });
-        await userCredential.user.reload(); // Force reload of user profile data
+        await userCredential.user.reload(); // Force reload of user profile data locally
       }
-      // The AuthProvider will handle Firestore document creation with the updated displayName
-      toast({ title: "Success", description: "Account created successfully. Please log in." });
-      setActiveTab("login"); 
-      loginForm.reset({ email: data.email }); 
-      signupForm.reset(); 
+      // The AuthProvider will handle Firestore document creation with the updated displayName.
+      // The useEffect in SignupPage (or main layout) will redirect once user is authenticated.
+      toast({ title: "Success", description: "Account created successfully!" });
+      signupForm.reset(); // Reset signup form fields
+      // No need to setActiveTab("login") or router.push("/chat") here,
+      // as the auth state change will trigger redirection via AuthProvider and page useEffects.
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -236,5 +237,4 @@ export function AuthForm() {
     </Card>
   );
 }
-
     
