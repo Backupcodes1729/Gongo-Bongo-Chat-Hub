@@ -7,7 +7,7 @@ export interface User extends FirebaseUser {
   createdAt?: Timestamp;
   dataAiHint?: string; // Optional hint for AI image generation for user avatar
   isOnline?: boolean;
-  lastSeen?: Timestamp;
+  lastSeen?: Timestamp | number; // Can be Firestore Timestamp or RTDB number
 }
 
 export interface ChatMessage {
@@ -45,7 +45,4 @@ export interface Chat {
   adminIds?: string[];
   createdBy?: string; // UID of user who created the group chat
   createdAt?: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
-  // Optional: For unread counts, could be a map like { [userId]: count }
-  // unreadCounts?: { [key: string]: number }; 
 }
-
