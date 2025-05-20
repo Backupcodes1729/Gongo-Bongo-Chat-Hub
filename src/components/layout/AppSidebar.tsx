@@ -36,16 +36,15 @@ function SidebarNavLink({ href, children, icon: Icon }: SidebarNavLinkProps) {
   const isActive = pathname === href || (href === "/chat" && pathname.startsWith("/chat/"));
 
   return (
-    <Link href={href} legacyBehavior>
-      <a
-        className={cn(
-          "flex items-center gap-3 rounded-lg px-3 py-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-          isActive && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground"
-        )}
-      >
-        <Icon className="h-5 w-5" />
-        {children}
-      </a>
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        isActive && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground"
+      )}
+    >
+      <Icon className="h-5 w-5" />
+      {children}
     </Link>
   );
 }
@@ -203,27 +202,23 @@ export function AppSidebar() {
               <Link
                 href={`/chat/${chat.id}`}
                 key={chat.id}
-                legacyBehavior
+                ref={(el: HTMLAnchorElement | null) => (chatItemRefs.current[chat.id] = el)}
+                className={cn(
+                  "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  chat.isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                )}
               >
-                <a
-                  ref={(el) => (chatItemRefs.current[chat.id] = el)}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                    chat.isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                  )}
-                >
-                  <CustomAvatar 
-                    src={chat.displayAvatar} 
-                    alt={chat.displayName} 
-                    className="h-9 w-9" 
-                    fallback={chat.displayName?.charAt(0) || "?"}
-                    data-ai-hint={chat.dataAiHint}
-                  />
-                  <div className="flex-1 truncate">
-                    <p className="font-medium text-sm truncate">{chat.displayName}</p>
-                    <p className="text-xs text-muted-foreground truncate">{chat.lastMessageText}</p>
-                  </div>
-                </a>
+                <CustomAvatar 
+                  src={chat.displayAvatar} 
+                  alt={chat.displayName} 
+                  className="h-9 w-9" 
+                  fallback={chat.displayName?.charAt(0) || "?"}
+                  data-ai-hint={chat.dataAiHint}
+                />
+                <div className="flex-1 truncate">
+                  <p className="font-medium text-sm truncate">{chat.displayName}</p>
+                  <p className="text-xs text-muted-foreground truncate">{chat.lastMessageText}</p>
+                </div>
               </Link>
             ))
           )}
@@ -244,3 +239,4 @@ export function AppSidebar() {
     </aside>
   );
 }
+
