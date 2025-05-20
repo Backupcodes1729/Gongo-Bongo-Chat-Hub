@@ -1,19 +1,18 @@
 
 import type { User as FirebaseUser } from "firebase/auth";
-import type { Timestamp } from "firebase/firestore";
+import type { Timestamp, FieldValue } from "firebase/firestore";
 
 export interface User extends FirebaseUser {
-  // You can extend this with custom properties if needed
-  // e.g. customUsername?: string;
   lastLogin?: Timestamp;
   createdAt?: Timestamp;
+  dataAiHint?: string; // Optional hint for AI image generation for user avatar
 }
 
 export interface ChatMessage {
   id: string;
   text: string;
   senderId: string;
-  timestamp: Timestamp | Date | any; // Firestore Timestamp, Date for client-side creation
+  timestamp: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
   status: 'sent' | 'delivered' | 'read';
   isEdited?: boolean;
   replyTo?: string; // Message ID being replied to
@@ -30,13 +29,16 @@ export interface Chat {
       photoURL: string | null;
     }
   };
-  lastMessage?: ChatMessage;
-  updatedAt: Timestamp | Date | any; // Firestore Timestamp
-  // Group chat specific fields
+  lastMessage?: {
+    text: string;
+    timestamp: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
+    senderId: string;
+  } | null; // Can be null if no messages or chat just created
+  updatedAt: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
   isGroup?: boolean;
   groupName?: string;
   groupAvatar?: string | null;
   adminIds?: string[];
   createdBy?: string; // UID of user who created the group chat
-  createdAt?: Timestamp | Date | any;
+  createdAt?: Timestamp | FieldValue; // For serverTimestamp on write, Timestamp on read
 }
