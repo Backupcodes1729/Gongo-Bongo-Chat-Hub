@@ -65,7 +65,9 @@ export default function IndividualChatPage() {
 
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView(); // Instant scroll to the bottom
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -132,8 +134,8 @@ export default function IndividualChatPage() {
   }, [chatDetails, currentUser?.uid]);
 
 
-  const fetchAiSuggestionsForMessage = async (messageText: string) => {
-    if (!messageText.trim()) return;
+  const fetchAiSuggestions = async (messageText: string) => {
+    if (!messageText.trim() || !currentUser) return;
     setLoadingAiSuggestions(true);
     setAiSuggestions([]);
     try {
@@ -162,7 +164,7 @@ export default function IndividualChatPage() {
       const latestMessage = fetchedMessages.length > 0 ? fetchedMessages[fetchedMessages.length - 1] : null;
       if (latestMessage && latestMessage.senderId !== currentUser?.uid && latestMessage.id !== lastProcessedMessageIdRef.current && !replyingToMessage) {
         lastProcessedMessageIdRef.current = latestMessage.id;
-        fetchAiSuggestionsForMessage(latestMessage.text);
+        fetchAiSuggestions(latestMessage.text);
       } else if ((!latestMessage || (latestMessage && latestMessage.senderId === currentUser?.uid)) && !replyingToMessage ) {
           setAiSuggestions([]);
           setLoadingAiSuggestions(false);
@@ -213,7 +215,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); // Clear reply mode and suggestions
+      handleSetReplyingToMessage(null); 
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -224,11 +226,16 @@ export default function IndividualChatPage() {
   const handleSetReplyingToMessage = (message: ChatMessage | null) => {
     setReplyingToMessage(message);
     if (message) {
-      fetchAiSuggestionsForMessage(message.text);
+      fetchAiSuggestions(message.text);
       inputRef.current?.focus();
     } else {
       setAiSuggestions([]); 
       setLoadingAiSuggestions(false);
+      // If there are existing messages and the last one is from partner, fetch suggestions for it
+      const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+      if (latestMessage && latestMessage.senderId !== currentUser?.uid) {
+        fetchAiSuggestions(latestMessage.text);
+      }
     }
   };
   
@@ -242,6 +249,7 @@ export default function IndividualChatPage() {
       if (rtdbPartnerStatus.isOnline) return <span className="text-xs text-green-500">Online</span>;
       if (rtdbPartnerStatus.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
     } else if (chatPartner) {
+      // Fallback to Firestore status if RTDB not available (though RTDB should be primary)
       if ((chatPartner as User).isOnline) return <span className="text-xs text-green-500">Online</span>;
       if ((chatPartner as User).lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime((chatPartner as User).lastSeen!)}</span>;
     }
@@ -382,7 +390,7 @@ export default function IndividualChatPage() {
             </Button>
           </div>
         )}
-         {aiSuggestions.length > 0 && !loadingAiSuggestions && (
+         {(aiSuggestions.length > 0 && !loadingAiSuggestions) && (
           <div className="p-2 flex flex-wrap gap-2 border-b items-center">
             <p className="text-xs text-muted-foreground mr-2">Suggestions:</p>
             {aiSuggestions.map((suggestion, index) => (
