@@ -6,8 +6,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { doc, serverTimestamp, updateDoc, onDisconnect, setDoc } from "firebase/firestore";
+import { db, auth, rtdb, databaseRef, rtdbSet, rtdbOnDisconnect, rtdbServerTimestamp } from "@/lib/firebase";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 
 
 export default function MainAppLayout({
@@ -27,47 +27,48 @@ export default function MainAppLayout({
   useEffect(() => {
     if (user?.uid) {
       const userDocRef = doc(db, "users", user.uid);
+      const userStatusRtdbRef = databaseRef(rtdb, '/status/' + user.uid);
 
-      // Set online and initial lastSeen on mount
+      // Set initial online status in Firestore
       updateDoc(userDocRef, {
         isOnline: true,
         lastSeen: serverTimestamp(),
       }).catch(console.error);
+
+      // Set initial online status in RTDB & setup onDisconnect
+      rtdbSet(userStatusRtdbRef, {
+        isOnline: true,
+        lastSeen: rtdbServerTimestamp(),
+        displayName: user.displayName || user.email,
+      }).then(() => {
+        rtdbOnDisconnect(userStatusRtdbRef).set({
+          isOnline: false,
+          lastSeen: rtdbServerTimestamp(),
+          displayName: user.displayName || user.email,
+        }).catch((err) => console.error("Error setting onDisconnect for RTDB:", err));
+      }).catch(err => console.error("Error setting initial RTDB status:", err));
       
-      // Periodically update lastSeen to keep the user marked as active
+      // Periodically update Firestore lastSeen to keep the user marked as active in Firestore
+      // This also serves as a fallback if RTDB onDisconnect fails or for clients not listening to RTDB.
       const intervalId = setInterval(() => {
-        if (auth.currentUser) { // Check if user is still logged in
+        if (auth.currentUser) { 
            updateDoc(userDocRef, {
              lastSeen: serverTimestamp(),
-             isOnline: true, // Re-assert online status
+             isOnline: true, 
            }).catch(console.error);
         }
       }, 60000); // Every 60 seconds
 
 
-      // Attempt to use onDisconnect for a more robust offline status.
-      // Note: This is more reliable with Realtime Database. Firestore's onDisconnect capabilities are limited.
-      // This is a best-effort for Firestore.
-      const userStatusFirestoreRef = doc(db, 'status', user.uid); // A separate collection for status could be an option
-      
-      // A more common Firestore pattern is to let clients write their online status,
-      // and use Cloud Functions to detect prolonged inactivity if onDisconnect is not robust enough.
-      // For this example, we'll primarily rely on the interval and logout updates.
-
       return () => {
         clearInterval(intervalId);
-        // onDisconnect().cancel(); // If using Realtime Database onDisconnect
-        // When the component unmounts (e.g., user navigates away or closes tab *gracefully*),
-        // try to set them as offline. This won't catch all scenarios like browser crashes.
-        if (auth.currentUser) { // Check if user is still effectively logged in before updating
-            updateDoc(userDocRef, {
-                isOnline: false,
-                lastSeen: serverTimestamp(),
-            }).catch(console.error);
-        }
+        // Note: Graceful logout (setting offline in RTDB & Firestore) is handled by AppHeader.
+        // The onDisconnect hook handles abrupt closures for RTDB.
+        // If the user navigates away from MainAppLayout but stays logged in (e.g. single page app navigation),
+        // their RTDB status will remain online until onDisconnect fires or they log out.
       };
     }
-  }, [user?.uid]);
+  }, [user?.uid, user?.displayName, user?.email]);
 
 
   if (loading) {
@@ -89,3 +90,4 @@ export default function MainAppLayout({
     </div>
   );
 }
+

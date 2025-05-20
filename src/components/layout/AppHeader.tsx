@@ -13,9 +13,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CustomAvatar } from "@/components/common/CustomAvatar";
 import { useAuth } from "@/hooks/useAuth";
-import { auth, db } from "@/lib/firebase"; // Import db
+import { auth, db, rtdb, databaseRef, rtdbSet, rtdbServerTimestamp } from "@/lib/firebase"; // Import RTDB items
 import { signOut } from "firebase/auth";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore"; // Import doc, serverTimestamp, updateDoc
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { LogOut, User as UserIconLucide, Settings, LifeBuoy } from "lucide-react";
 import { LogoIcon } from "@/components/icons/LogoIcon";
@@ -27,11 +27,21 @@ export function AppHeader() {
   const handleSignOut = async () => {
     if (user) {
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, {
+        // Update Firestore status
+        const userFirestoreRef = doc(db, "users", user.uid);
+        await updateDoc(userFirestoreRef, {
           isOnline: false,
           lastSeen: serverTimestamp(),
         });
+
+        // Update RTDB status
+        const userRtdbRef = databaseRef(rtdb, '/status/' + user.uid);
+        await rtdbSet(userRtdbRef, {
+          isOnline: false,
+          lastSeen: rtdbServerTimestamp(),
+          displayName: user.displayName || user.email,
+        });
+
       } catch (error) {
         console.error("Error updating user status on sign out:", error);
       }
@@ -100,3 +110,4 @@ export function AppHeader() {
     </header>
   );
 }
+

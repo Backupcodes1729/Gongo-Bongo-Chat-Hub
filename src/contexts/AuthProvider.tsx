@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import React, { createContext, useEffect, useState }  from "react";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, rtdb, databaseRef, rtdbSet, rtdbServerTimestamp } from "@/lib/firebase"; // Added RTDB imports
 import type { User } from "@/lib/types";
 import { doc, setDoc, serverTimestamp, getDoc, Timestamp } from "firebase/firestore";
 
@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true); 
       if (firebaseUser) {
         const userRef = doc(db, "users", firebaseUser.uid);
+        const userStatusRtdbRef = databaseRef(rtdb, '/status/' + firebaseUser.uid); // RTDB ref
         
         const authProfileData = {
           email: firebaseUser.email, 
@@ -47,53 +48,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               lastSeen: serverTimestamp(),
             };
             await setDoc(userRef, newUserDocumentData);
+            // Set RTDB status
+            await rtdbSet(userStatusRtdbRef, {
+              isOnline: true,
+              lastSeen: rtdbServerTimestamp(),
+              displayName: firebaseUser.displayName, // Optional: store displayName in RTDB for convenience
+            });
             
-            const createdSnap = await getDoc(userRef);
-            if (createdSnap.exists()) {
-              setUser(createdSnap.data() as User);
-            } else {
-              const fallbackUser: User = {
-                ...firebaseUser,
-                createdAt: undefined, 
-                lastLogin: undefined,
-                isOnline: true,
-                lastSeen: undefined,
-              };
-              setUser(fallbackUser);
-            }
+            const createdSnap = await getDoc(userRef); // Re-fetch to get server timestamps
+            setUser(createdSnap.exists() ? createdSnap.data() as User : firebaseUser as User);
+
           } else {
             const updateData: Partial<User> = {
               ...authProfileData, 
               lastLogin: serverTimestamp(),
-              isOnline: true,
+              isOnline: true, // Explicitly set online on login/auth state change
               lastSeen: serverTimestamp(),
             };
             await setDoc(userRef, updateData, { merge: true });
-
-            const updatedSnap = await getDoc(userRef);
-            if (updatedSnap.exists()) {
-              setUser(updatedSnap.data() as User);
-            } else {
-               const fallbackUser: User = {
-                ...firebaseUser,
-                createdAt: userSnap.data()?.createdAt,
-                lastLogin: undefined, 
-                isOnline: true,
-                lastSeen: undefined,
-              };
-              setUser(fallbackUser);
-            }
+             // Update RTDB status
+            await rtdbSet(userStatusRtdbRef, {
+              isOnline: true,
+              lastSeen: rtdbServerTimestamp(),
+              displayName: firebaseUser.displayName,
+            });
+            
+            const updatedSnap = await getDoc(userRef); // Re-fetch to get server timestamps
+            setUser(updatedSnap.exists() ? updatedSnap.data() as User : firebaseUser as User);
           }
         } catch (error) {
           console.error("Error managing user document in AuthProvider:", error);
-           const fallbackUser: User = {
-            ...firebaseUser,
-            createdAt: undefined, 
-            lastLogin: undefined,
-            isOnline: true,
-            lastSeen: undefined,
-          };
-          setUser(fallbackUser);
+          setUser(firebaseUser as User); // Fallback
         }
       } else {
         setUser(null);
@@ -110,3 +95,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   );
 }
+

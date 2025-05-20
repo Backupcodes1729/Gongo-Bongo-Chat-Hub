@@ -10,7 +10,8 @@ import { ArrowLeft, Paperclip, SendHorizonal, Smile, Mic, Phone, Video, Info, Lo
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useState, useEffect, useRef, FormEvent } from "react";
-import { db, auth } from "@/lib/firebase"; // Import auth
+import { db, auth, rtdb, databaseRef } from "@/lib/firebase"; 
+import { onValue, off } from "firebase/database"; // RTDB specific imports
 import {
   doc,
   getDoc,
@@ -25,7 +26,7 @@ import {
   arrayUnion
 } from "firebase/firestore";
 import type { User, ChatMessage, Chat } from "@/lib/types";
-import { formatRelativeTime } from "@/lib/utils"; // Import the new utility
+import { formatRelativeTime } from "@/lib/utils";
 
 // Helper function to format timestamp for messages
 const formatMessageTimestamp = (timestamp: Timestamp | Date | undefined): string => {
@@ -33,6 +34,12 @@ const formatMessageTimestamp = (timestamp: Timestamp | Date | undefined): string
   const date = timestamp instanceof Timestamp ? timestamp.toDate() : timestamp;
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
+
+interface RtdbUserStatus {
+  isOnline: boolean;
+  lastSeen: number; // RTDB timestamp is a number
+  displayName?: string;
+}
 
 export default function IndividualChatPage() {
   const params = useParams();
@@ -43,7 +50,8 @@ export default function IndividualChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [chatDetails, setChatDetails] = useState<Chat | null>(null);
-  const [chatPartner, setChatPartner] = useState<User | null>(null);
+  const [chatPartner, setChatPartner] = useState<User | null>(null); // Firestore user data
+  const [rtdbPartnerStatus, setRtdbPartnerStatus] = useState<RtdbUserStatus | null>(null); // RTDB status
   const [loadingChat, setLoadingChat] = useState(true);
   const [sendingMessage, setSendingMessage] = useState(false);
 
@@ -54,67 +62,80 @@ export default function IndividualChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch chat details and participant info (including real-time updates for partner status)
+  // Fetch chat details and Firestore participant info
   useEffect(() => {
     if (!chatId || !currentUser?.uid) return;
-
     setLoadingChat(true);
     const chatDocRef = doc(db, "chats", chatId);
 
     const unsubscribeChatDetails = onSnapshot(chatDocRef, async (docSnap) => {
       if (docSnap.exists()) {
-        const chatData = docSnap.data() as Chat;
-        chatData.id = docSnap.id;
+        const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
         setChatDetails(chatData);
 
         if (!chatData.isGroup && chatData.participants) {
           const partnerId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (partnerId) {
-            // Subscribe to real-time updates for the chat partner's user document
             const userDocRef = doc(db, "users", partnerId);
-            return onSnapshot(userDocRef, (userSnap) => {
-              if (userSnap.exists()) {
-                setChatPartner(userSnap.data() as User);
-              } else {
-                console.warn("Chat partner user document not found:", partnerId);
-                setChatPartner(null); 
-              }
-              setLoadingChat(false); // Set loading to false after partner data is fetched/updated
-            }, (error) => {
-              console.error("Error fetching chat partner details:", error);
-              setLoadingChat(false);
-            });
-          } else {
-            setLoadingChat(false); // No partner ID found
+            // Get Firestore user data once, RTDB will handle live status
+            const userSnap = await getDoc(userDocRef);
+            if (userSnap.exists()) {
+              setChatPartner(userSnap.data() as User);
+            } else {
+              console.warn("Chat partner user document (Firestore) not found:", partnerId);
+              setChatPartner(null);
+            }
           }
         } else if (chatData.isGroup) {
-          setChatPartner(null); 
-          setLoadingChat(false);
-        } else {
-           setLoadingChat(false); // Not a group and no participants somehow
+          setChatPartner(null); // No single partner for groups
         }
       } else {
         console.error("Chat not found!");
         setChatDetails(null);
         setChatPartner(null);
-        setLoadingChat(false);
       }
+      setLoadingChat(false);
     }, (error) => {
-      console.error("Error fetching chat details:", error);
+      console.error("Error fetching chat details (Firestore):", error);
       setLoadingChat(false);
     });
 
-    return () => {
-      unsubscribeChatDetails();
-      // The partner snapshot listener is returned by the onSnapshot call itself,
-      // so it will be cleaned up when unsubscribeChatDetails is called if it was set up.
-    };
+    return () => unsubscribeChatDetails();
   }, [chatId, currentUser?.uid]);
+
+  // Listen to RTDB for partner's status
+  useEffect(() => {
+    if (!chatDetails || chatDetails.isGroup || !currentUser?.uid) {
+      setRtdbPartnerStatus(null);
+      return;
+    }
+    
+    const partnerId = chatDetails.participants.find(pId => pId !== currentUser.uid);
+    if (!partnerId) {
+      setRtdbPartnerStatus(null);
+      return;
+    }
+
+    const partnerStatusRtdbRef = databaseRef(rtdb, `/status/${partnerId}`);
+    const listener = onValue(partnerStatusRtdbRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setRtdbPartnerStatus(snapshot.val() as RtdbUserStatus);
+      } else {
+        setRtdbPartnerStatus(null); // Partner might not have RTDB status yet
+      }
+    }, (error) => {
+      console.error("Error fetching partner status from RTDB:", error);
+      setRtdbPartnerStatus(null);
+    });
+
+    return () => off(partnerStatusRtdbRef, 'value', listener); // Detach listener
+
+  }, [chatDetails, currentUser?.uid]);
+
 
   // Fetch messages
   useEffect(() => {
     if (!chatId) return;
-
     const messagesColRef = collection(db, "chats", chatId, "messages");
     const q = query(messagesColRef, orderBy("timestamp", "asc"));
 
@@ -127,7 +148,6 @@ export default function IndividualChatPage() {
     }, (error) => {
       console.error("Error fetching messages:", error);
     });
-
     return () => unsubscribeMessages();
   }, [chatId]);
 
@@ -160,7 +180,6 @@ export default function IndividualChatPage() {
         updatedAt: serverTimestamp(),
         participants: arrayUnion(currentUser.uid) 
       });
-
       setNewMessage("");
     } catch (error) {
       console.error("Error sending message: ", error);
@@ -169,18 +188,30 @@ export default function IndividualChatPage() {
     }
   };
   
-  const partnerName = chatDetails?.isGroup ? chatDetails.groupName : chatPartner?.displayName;
-  const partnerAvatar = chatDetails?.isGroup ? chatDetails.groupAvatar : chatPartner?.photoURL;
+  const partnerName = chatDetails?.isGroup ? chatDetails.groupName : (rtdbPartnerStatus?.displayName || chatPartner?.displayName);
+  const partnerAvatar = chatDetails?.isGroup ? chatDetails.groupAvatar : chatPartner?.photoURL; // Firestore photoURL
   const partnerDataAiHint = chatDetails?.isGroup ? "group avatar" : (chatPartner as any)?.dataAiHint || "person avatar";
   
   const getPartnerStatus = () => {
-    if (chatDetails?.isGroup) return null; // No individual status for group chats header
-    if (!chatPartner) return <span className="text-xs text-muted-foreground">Loading status...</span>;
-    if (chatPartner.isOnline) {
-      return <span className="text-xs text-green-500">Online</span>;
+    if (chatDetails?.isGroup) return null;
+    
+    // Prioritize RTDB status
+    if (rtdbPartnerStatus) {
+      if (rtdbPartnerStatus.isOnline) {
+        return <span className="text-xs text-green-500">Online</span>;
+      }
+      if (rtdbPartnerStatus.lastSeen) {
+        return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
+      }
     }
-    if (chatPartner.lastSeen) {
-      return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(chatPartner.lastSeen)}</span>;
+    // Fallback to Firestore status (might be less up-to-date for disconnections)
+    else if (chatPartner) {
+      if (chatPartner.isOnline) { // This is Firestore's isOnline
+        return <span className="text-xs text-green-500">Online</span>;
+      }
+      if (chatPartner.lastSeen) { // This is Firestore's lastSeen
+        return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(chatPartner.lastSeen)}</span>;
+      }
     }
     return <span className="text-xs text-muted-foreground">Offline</span>;
   };
@@ -331,3 +362,4 @@ export default function IndividualChatPage() {
     </div>
   );
 }
+
