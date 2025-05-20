@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,8 +21,8 @@ interface SidebarChatItem {
   displayAvatar: string | null;
   lastMessageText: string;
   lastMessageTimestamp?: Timestamp | Date | any;
-  // unreadCount: number; // TODO: Implement unread count logic
   isActive: boolean;
+  dataAiHint?: string;
 }
 
 interface SidebarNavLinkProps {
@@ -55,6 +55,7 @@ export function AppSidebar() {
   const { user: currentUser } = useAuth();
   const [sidebarChats, setSidebarChats] = useState<SidebarChatItem[]>([]);
   const [loadingChats, setLoadingChats] = useState(true);
+  const chatItemRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
 
   useEffect(() => {
     if (!currentUser) {
@@ -73,10 +74,9 @@ export function AppSidebar() {
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
       const fetchedChats: SidebarChatItem[] = [];
-      const participantPromises: Promise<AppUser | null>[] = [];
+      const otherParticipantIds: string[] = [];
       const chatDocs = querySnapshot.docs;
 
-      const otherParticipantIds: string[] = [];
       chatDocs.forEach(chatDoc => {
         const chatData = chatDoc.data() as Chat;
         if (!chatData.isGroup) {
@@ -89,6 +89,7 @@ export function AppSidebar() {
       
       const usersDataMap = new Map<string, AppUser>();
       if (otherParticipantIds.length > 0) {
+        // Batch fetch user documents for efficiency if many chats
         const userDocsPromises = otherParticipantIds.map(id => getDoc(doc(db, "users", id)));
         const userDocsSnapshots = await Promise.all(userDocsPromises);
         userDocsSnapshots.forEach(userDocSnap => {
@@ -100,24 +101,26 @@ export function AppSidebar() {
 
       for (const chatDoc of chatDocs) {
         const chatData = chatDoc.data() as Chat;
-        chatData.id = chatDoc.id; // Ensure ID is part of the object
+        chatData.id = chatDoc.id; 
 
         let displayName = "Chat";
         let displayAvatar: string | null = null;
-        let otherParticipantId: string | undefined = undefined;
+        let dataAiHint: string = "person avatar"; 
 
         if (chatData.isGroup) {
           displayName = chatData.groupName || "Group Chat";
           displayAvatar = chatData.groupAvatar || null;
+          dataAiHint = "group avatar";
         } else {
-          otherParticipantId = chatData.participants.find(pId => pId !== currentUser.uid);
+          const otherParticipantId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (otherParticipantId) {
             const otherParticipantUser = usersDataMap.get(otherParticipantId);
             if (otherParticipantUser) {
               displayName = otherParticipantUser.displayName || "User";
               displayAvatar = otherParticipantUser.photoURL || null;
+              dataAiHint = otherParticipantUser.dataAiHint || "person avatar";
             } else {
-              displayName = "Loading User..."; // Or some default
+              displayName = "Loading User..."; 
             }
           }
         }
@@ -127,7 +130,6 @@ export function AppSidebar() {
             lastMessageText = lastMessageText.substring(0, 27) + "...";
         }
 
-
         fetchedChats.push({
           id: chatData.id,
           displayName,
@@ -135,10 +137,10 @@ export function AppSidebar() {
           lastMessageText: lastMessageText,
           lastMessageTimestamp: chatData.lastMessage?.timestamp || chatData.updatedAt,
           isActive: pathname === `/chat/${chatData.id}`,
+          dataAiHint,
         });
       }
       
-      // Sort by lastMessageTimestamp if available, otherwise updatedAt
       fetchedChats.sort((a, b) => {
         const timeA = a.lastMessageTimestamp?.seconds || 0;
         const timeB = b.lastMessageTimestamp?.seconds || 0;
@@ -154,6 +156,17 @@ export function AppSidebar() {
 
     return () => unsubscribe();
   }, [currentUser, pathname]);
+
+
+  useEffect(() => {
+    const activeChat = sidebarChats.find(chat => chat.isActive);
+    if (activeChat && chatItemRefs.current[activeChat.id]) {
+      chatItemRefs.current[activeChat.id]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [pathname, sidebarChats]); // Rerun when active chat changes or chat list updates
 
   return (
     <aside className="hidden md:flex flex-col w-72 border-r bg-sidebar text-sidebar-foreground">
@@ -190,22 +203,27 @@ export function AppSidebar() {
               <Link
                 href={`/chat/${chat.id}`}
                 key={chat.id}
-                className={cn(
-                  "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  chat.isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                )}
+                legacyBehavior
               >
-                <CustomAvatar src={chat.displayAvatar} alt={chat.displayName} className="h-9 w-9" />
-                <div className="flex-1 truncate">
-                  <p className="font-medium text-sm truncate">{chat.displayName}</p>
-                  <p className="text-xs text-muted-foreground truncate">{chat.lastMessageText}</p>
-                </div>
-                {/* Placeholder for unread count */}
-                {/* {chat.unreadCount > 0 && (
-                  <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                    {chat.unreadCount}
-                  </span>
-                )} */}
+                <a
+                  ref={(el) => (chatItemRefs.current[chat.id] = el)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    chat.isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                  )}
+                >
+                  <CustomAvatar 
+                    src={chat.displayAvatar} 
+                    alt={chat.displayName} 
+                    className="h-9 w-9" 
+                    fallback={chat.displayName?.charAt(0) || "?"}
+                    data-ai-hint={chat.dataAiHint}
+                  />
+                  <div className="flex-1 truncate">
+                    <p className="font-medium text-sm truncate">{chat.displayName}</p>
+                    <p className="text-xs text-muted-foreground truncate">{chat.lastMessageText}</p>
+                  </div>
+                </a>
               </Link>
             ))
           )}
