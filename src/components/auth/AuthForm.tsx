@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebase";
+import { auth, googleProvider, db } from "@/lib/firebase"; // Added db
+import { doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore"; // Added doc, setDoc, serverTimestamp, getDoc
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -56,7 +57,7 @@ export function AuthForm() {
     try {
       await signInWithPopup(auth, googleProvider);
       toast({ title: "Success", description: "Signed in with Google successfully." });
-      // Router push to /chat is handled by useEffect in login/signup pages or main layout
+      // AuthProvider handles Firestore document creation for Google Sign-In
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -71,7 +72,6 @@ export function AuthForm() {
     try {
       await signInWithEmailAndPassword(auth, data.email, data.password);
       toast({ title: "Success", description: "Logged in successfully." });
-      // Router push to /chat is handled by useEffect in login/signup pages or main layout
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -85,20 +85,45 @@ export function AuthForm() {
     setError(null);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
-      // Update Firebase Auth profile with display name
+      
       if (userCredential.user) {
+        // Update Firebase Auth profile with display name
         await updateProfile(userCredential.user, {
           displayName: data.displayName,
           // photoURL can be set here later if we allow avatar upload during signup
         });
-        await userCredential.user.reload(); // Force reload of user profile data locally
+        // Reload the user to ensure the local Auth state has the displayName
+        await userCredential.user.reload();
+
+        // Create/update the user document in Firestore
+        const userDocRef = doc(db, "users", userCredential.user.uid);
+        
+        const userDataToSet = {
+          uid: userCredential.user.uid,
+          email: userCredential.user.email,
+          displayName: data.displayName, // Use displayName from the form directly
+          photoURL: userCredential.user.photoURL, // Use photoURL from reloaded Auth user (might be null)
+          lastLogin: serverTimestamp(),
+        };
+
+        // Check if document exists to conditionally add createdAt
+        // This is a safeguard, typically it won't exist for a new signup.
+        const docSnap = await getDoc(userDocRef);
+        if (!docSnap.exists()) {
+          await setDoc(userDocRef, {
+            ...userDataToSet,
+            createdAt: serverTimestamp(),
+          });
+        } else {
+          // If it somehow exists (e.g., due to a very rapid AuthProvider trigger, though unlikely here),
+          // merge the data. This ensures our form's displayName takes precedence.
+          await setDoc(userDocRef, userDataToSet, { merge: true });
+        }
       }
-      // The AuthProvider will handle Firestore document creation with the updated displayName.
-      // The useEffect in SignupPage (or main layout) will redirect once user is authenticated.
+
       toast({ title: "Success", description: "Account created successfully!" });
-      signupForm.reset(); // Reset signup form fields
-      // No need to setActiveTab("login") or router.push("/chat") here,
-      // as the auth state change will trigger redirection via AuthProvider and page useEffects.
+      signupForm.reset();
+      // No need to setActiveTab or router.push; AuthProvider and page/layout useEffects will handle redirection.
     } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -237,4 +262,6 @@ export function AuthForm() {
     </Card>
   );
 }
+    
+
     
