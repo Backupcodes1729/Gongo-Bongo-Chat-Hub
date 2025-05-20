@@ -1,26 +1,29 @@
+
 "use client";
 
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CustomAvatar } from "@/components/common/CustomAvatar";
-import { PlusCircle, Search, MessageSquare, Users, Settings } from "lucide-react";
+import { PlusCircle, Search, MessageSquare, Users, Settings, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebase";
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, Timestamp } from "firebase/firestore";
+import type { Chat, User as AppUser } from "@/lib/types";
 
-// Placeholder data - replace with actual data fetching
-const mockChats = [
-  { id: "1", name: "Alice Wonderland", lastMessage: "See you soon!", avatar: "https://placehold.co/100x100.png", unread: 2, dataAiHint: "woman portrait" },
-  { id: "2", name: "Bob The Builder", lastMessage: "Can we fix it?", avatar: "https://placehold.co/100x100.png", unread: 0, dataAiHint: "man construction" },
-  { id: "3", name: "Charlie Brown", lastMessage: "Good grief!", avatar: "https://placehold.co/100x100.png", unread: 5, dataAiHint: "boy cartoon" },
-];
-
-const mockContacts = [
-   { id: "4", name: "Diana Prince", avatar: "https://placehold.co/100x100.png", dataAiHint: "woman hero" },
-   { id: "5", name: "Edward Elric", avatar: "https://placehold.co/100x100.png", dataAiHint: "boy anime" },
-];
-
+interface SidebarChatItem {
+  id: string; // Chat ID
+  displayName: string;
+  displayAvatar: string | null;
+  lastMessageText: string;
+  lastMessageTimestamp?: Timestamp | Date | any;
+  // unreadCount: number; // TODO: Implement unread count logic
+  isActive: boolean;
+}
 
 interface SidebarNavLinkProps {
   href: string;
@@ -31,7 +34,6 @@ interface SidebarNavLinkProps {
 function SidebarNavLink({ href, children, icon: Icon }: SidebarNavLinkProps) {
   const pathname = usePathname();
   const isActive = pathname === href || (href === "/chat" && pathname.startsWith("/chat/"));
-
 
   return (
     <Link href={href} legacyBehavior>
@@ -48,12 +50,110 @@ function SidebarNavLink({ href, children, icon: Icon }: SidebarNavLinkProps) {
   );
 }
 
-
 export function AppSidebar() {
   const pathname = usePathname();
-  // This logic determines if we are in a specific chat view, to highlight the parent /chat link.
-  const isChatActive = pathname.startsWith("/chat");
+  const { user: currentUser } = useAuth();
+  const [sidebarChats, setSidebarChats] = useState<SidebarChatItem[]>([]);
+  const [loadingChats, setLoadingChats] = useState(true);
 
+  useEffect(() => {
+    if (!currentUser) {
+      setLoadingChats(false);
+      setSidebarChats([]);
+      return;
+    }
+
+    setLoadingChats(true);
+    const chatsRef = collection(db, "chats");
+    const q = query(
+      chatsRef,
+      where("participants", "array-contains", currentUser.uid),
+      orderBy("updatedAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+      const fetchedChats: SidebarChatItem[] = [];
+      const participantPromises: Promise<AppUser | null>[] = [];
+      const chatDocs = querySnapshot.docs;
+
+      const otherParticipantIds: string[] = [];
+      chatDocs.forEach(chatDoc => {
+        const chatData = chatDoc.data() as Chat;
+        if (!chatData.isGroup) {
+          const otherId = chatData.participants.find(pId => pId !== currentUser.uid);
+          if (otherId && !otherParticipantIds.includes(otherId)) {
+            otherParticipantIds.push(otherId);
+          }
+        }
+      });
+      
+      const usersDataMap = new Map<string, AppUser>();
+      if (otherParticipantIds.length > 0) {
+        const userDocsPromises = otherParticipantIds.map(id => getDoc(doc(db, "users", id)));
+        const userDocsSnapshots = await Promise.all(userDocsPromises);
+        userDocsSnapshots.forEach(userDocSnap => {
+          if (userDocSnap.exists()) {
+            usersDataMap.set(userDocSnap.id, userDocSnap.data() as AppUser);
+          }
+        });
+      }
+
+      for (const chatDoc of chatDocs) {
+        const chatData = chatDoc.data() as Chat;
+        chatData.id = chatDoc.id; // Ensure ID is part of the object
+
+        let displayName = "Chat";
+        let displayAvatar: string | null = null;
+        let otherParticipantId: string | undefined = undefined;
+
+        if (chatData.isGroup) {
+          displayName = chatData.groupName || "Group Chat";
+          displayAvatar = chatData.groupAvatar || null;
+        } else {
+          otherParticipantId = chatData.participants.find(pId => pId !== currentUser.uid);
+          if (otherParticipantId) {
+            const otherParticipantUser = usersDataMap.get(otherParticipantId);
+            if (otherParticipantUser) {
+              displayName = otherParticipantUser.displayName || "User";
+              displayAvatar = otherParticipantUser.photoURL || null;
+            } else {
+              displayName = "Loading User..."; // Or some default
+            }
+          }
+        }
+        
+        let lastMessageText = chatData.lastMessage?.text || "No messages yet";
+        if (lastMessageText.length > 30) {
+            lastMessageText = lastMessageText.substring(0, 27) + "...";
+        }
+
+
+        fetchedChats.push({
+          id: chatData.id,
+          displayName,
+          displayAvatar,
+          lastMessageText: lastMessageText,
+          lastMessageTimestamp: chatData.lastMessage?.timestamp || chatData.updatedAt,
+          isActive: pathname === `/chat/${chatData.id}`,
+        });
+      }
+      
+      // Sort by lastMessageTimestamp if available, otherwise updatedAt
+      fetchedChats.sort((a, b) => {
+        const timeA = a.lastMessageTimestamp?.seconds || 0;
+        const timeB = b.lastMessageTimestamp?.seconds || 0;
+        return timeB - timeA;
+      });
+
+      setSidebarChats(fetchedChats);
+      setLoadingChats(false);
+    }, (error) => {
+      console.error("Error fetching chats:", error);
+      setLoadingChats(false);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser, pathname]);
 
   return (
     <aside className="hidden md:flex flex-col w-72 border-r bg-sidebar text-sidebar-foreground">
@@ -67,39 +167,50 @@ export function AppSidebar() {
 
       <ScrollArea className="flex-1 px-2">
         <nav className="grid items-start gap-1">
-           <SidebarNavLink href="/chat" icon={MessageSquare}>
+          <SidebarNavLink href="/chat" icon={MessageSquare}>
             All Chats
           </SidebarNavLink>
-           <SidebarNavLink href="/contacts" icon={Users}>
+          <SidebarNavLink href="/contacts" icon={Users}>
             Contacts
           </SidebarNavLink>
         </nav>
 
         <div className="mt-4 px-1">
-          <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">Recent Chats</h3>
-          {mockChats.map((chat) => (
-            <Link
-              href={`/chat/${chat.id}`}
-              key={chat.id}
-              className={cn(
-                "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                pathname === `/chat/${chat.id}` && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-              )}
-            >
-              <CustomAvatar src={chat.avatar} alt={chat.name} className="h-9 w-9" data-ai-hint={chat.dataAiHint} />
-              <div className="flex-1 truncate">
-                <p className="font-medium text-sm truncate">{chat.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{chat.lastMessage}</p>
-              </div>
-              {chat.unread > 0 && (
-                <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                  {chat.unread}
-                </span>
-              )}
-            </Link>
-          ))}
+          <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">Your Chats</h3>
+          {loadingChats ? (
+            <div className="flex justify-center items-center py-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : sidebarChats.length === 0 && currentUser ? (
+            <p className="p-2 text-sm text-muted-foreground">No chats yet. Start a new conversation!</p>
+          ) : !currentUser && !loadingChats ? (
+             <p className="p-2 text-sm text-muted-foreground">Login to see your chats.</p>
+          ) : (
+            sidebarChats.map((chat) => (
+              <Link
+                href={`/chat/${chat.id}`}
+                key={chat.id}
+                className={cn(
+                  "flex items-center gap-3 rounded-md p-2 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  chat.isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                )}
+              >
+                <CustomAvatar src={chat.displayAvatar} alt={chat.displayName} className="h-9 w-9" />
+                <div className="flex-1 truncate">
+                  <p className="font-medium text-sm truncate">{chat.displayName}</p>
+                  <p className="text-xs text-muted-foreground truncate">{chat.lastMessageText}</p>
+                </div>
+                {/* Placeholder for unread count */}
+                {/* {chat.unreadCount > 0 && (
+                  <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
+                    {chat.unreadCount}
+                  </span>
+                )} */}
+              </Link>
+            ))
+          )}
         </div>
-         <div className="mt-6 px-1">
+        <div className="mt-6 px-1">
           <Button variant="outline" className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
             <PlusCircle className="h-5 w-5" />
             Invite Contacts
@@ -109,7 +220,7 @@ export function AppSidebar() {
       
       <div className="mt-auto p-4 border-t border-sidebar-border">
         <SidebarNavLink href="/settings" icon={Settings}>
-            Settings
+          Settings
         </SidebarNavLink>
       </div>
     </aside>
