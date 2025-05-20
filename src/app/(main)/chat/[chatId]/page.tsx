@@ -132,7 +132,7 @@ export default function IndividualChatPage() {
   }, [chatDetails, currentUser?.uid]);
 
 
-  const fetchAiSuggestions = async (messageText: string) => {
+  const fetchAiSuggestionsForMessage = async (messageText: string) => {
     if (!messageText.trim()) return;
     setLoadingAiSuggestions(true);
     setAiSuggestions([]);
@@ -160,12 +160,10 @@ export default function IndividualChatPage() {
       setMessages(fetchedMessages);
 
       const latestMessage = fetchedMessages.length > 0 ? fetchedMessages[fetchedMessages.length - 1] : null;
-      // Only fetch suggestions for new incoming messages if not currently in reply mode
       if (latestMessage && latestMessage.senderId !== currentUser?.uid && latestMessage.id !== lastProcessedMessageIdRef.current && !replyingToMessage) {
         lastProcessedMessageIdRef.current = latestMessage.id;
-        fetchAiSuggestions(latestMessage.text);
+        fetchAiSuggestionsForMessage(latestMessage.text);
       } else if ((!latestMessage || (latestMessage && latestMessage.senderId === currentUser?.uid)) && !replyingToMessage ) {
-          // Clear suggestions if current user sent the last message or no messages, and not in reply mode
           setAiSuggestions([]);
           setLoadingAiSuggestions(false);
       }
@@ -174,7 +172,7 @@ export default function IndividualChatPage() {
       console.error("Error fetching messages:", error);
     });
     return () => unsubscribeMessages();
-  }, [chatId, currentUser?.uid, replyingToMessage]); // Added replyingToMessage to dependency array
+  }, [chatId, currentUser?.uid, replyingToMessage]); 
 
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
@@ -215,8 +213,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      setReplyingToMessage(null); // This will also clear AI suggestions if they were for the reply
-      setAiSuggestions([]); 
+      handleSetReplyingToMessage(null); // Clear reply mode and suggestions
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -227,10 +224,10 @@ export default function IndividualChatPage() {
   const handleSetReplyingToMessage = (message: ChatMessage | null) => {
     setReplyingToMessage(message);
     if (message) {
-      fetchAiSuggestions(message.text);
+      fetchAiSuggestionsForMessage(message.text);
       inputRef.current?.focus();
     } else {
-      setAiSuggestions([]); // Clear suggestions if cancelling reply
+      setAiSuggestions([]); 
       setLoadingAiSuggestions(false);
     }
   };
@@ -245,7 +242,6 @@ export default function IndividualChatPage() {
       if (rtdbPartnerStatus.isOnline) return <span className="text-xs text-green-500">Online</span>;
       if (rtdbPartnerStatus.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
     } else if (chatPartner) {
-      // Fallback to Firestore data if RTDB not available, though RTDB should be primary for presence
       if ((chatPartner as User).isOnline) return <span className="text-xs text-green-500">Online</span>;
       if ((chatPartner as User).lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime((chatPartner as User).lastSeen!)}</span>;
     }
@@ -314,9 +310,25 @@ export default function IndividualChatPage() {
                   }`}
                 >
                   {msg.replyTo && msg.repliedMessageText && (
-                    <div className={`mb-2 p-2 rounded-lg text-xs min-w-0 ${ msg.senderId === currentUser?.uid ? 'bg-primary/60' : 'bg-muted'}`}>
-                      <p className="font-semibold text-sm">{msg.repliedMessageSender === (currentUser?.displayName || currentUser?.email) ? "You" : msg.repliedMessageSender}</p>
-                      <p className="opacity-80 break-words">{msg.repliedMessageText}</p>
+                    <div className={`mb-1.5 pl-2.5 py-1 pr-1 border-l-2 min-w-0 ${
+                        msg.senderId === currentUser?.uid
+                            ? 'border-primary-foreground/60'
+                            : 'border-accent'
+                    }`}>
+                      <p className={`font-semibold text-sm ${
+                          msg.senderId === currentUser?.uid
+                              ? 'text-primary-foreground'
+                              : 'text-accent'
+                      }`}>
+                        {msg.repliedMessageSender === (currentUser?.displayName || currentUser?.email) ? "You" : msg.repliedMessageSender}
+                      </p>
+                      <p className={`break-words text-sm ${
+                          msg.senderId === currentUser?.uid
+                              ? 'text-primary-foreground/90'
+                              : 'text-muted-foreground'
+                      }`}>
+                        {msg.repliedMessageText}
+                      </p>
                     </div>
                   )}
                   <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
