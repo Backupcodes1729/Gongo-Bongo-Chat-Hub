@@ -125,10 +125,27 @@ export default function IndividualChatPage() {
         setRtdbPartnerStatus(null);
       }
     }, (error) => {
+      console.error("Error fetching RTDB partner status:", error);
       setRtdbPartnerStatus(null);
     });
     return () => off(partnerStatusRtdbRef, 'value', listener);
   }, [chatDetails, currentUser?.uid]);
+
+
+  const fetchAiSuggestions = async (messageText: string) => {
+    if (!messageText.trim()) return;
+    setLoadingAiSuggestions(true);
+    setAiSuggestions([]);
+    try {
+      const response = await suggestReply({ message: messageText });
+      setAiSuggestions(response.suggestions);
+    } catch (error) {
+      console.error("Error fetching AI suggestions:", error);
+      setAiSuggestions([]);
+    } finally {
+      setLoadingAiSuggestions(false);
+    }
+  };
 
   useEffect(() => {
     if (!chatId || !currentUser?.uid) return;
@@ -143,21 +160,12 @@ export default function IndividualChatPage() {
       setMessages(fetchedMessages);
 
       const latestMessage = fetchedMessages.length > 0 ? fetchedMessages[fetchedMessages.length - 1] : null;
-      if (latestMessage && latestMessage.senderId !== currentUser?.uid && latestMessage.id !== lastProcessedMessageIdRef.current) {
+      // Only fetch suggestions for new incoming messages if not currently in reply mode
+      if (latestMessage && latestMessage.senderId !== currentUser?.uid && latestMessage.id !== lastProcessedMessageIdRef.current && !replyingToMessage) {
         lastProcessedMessageIdRef.current = latestMessage.id;
-        setLoadingAiSuggestions(true);
-        setAiSuggestions([]);
-        suggestReply({ message: latestMessage.text })
-          .then(response => {
-            setAiSuggestions(response.suggestions);
-          })
-          .catch(error => {
-            console.error("Error fetching AI suggestions:", error);
-          })
-          .finally(() => {
-            setLoadingAiSuggestions(false);
-          });
-      } else if (!latestMessage || (latestMessage && latestMessage.senderId === currentUser?.uid)) {
+        fetchAiSuggestions(latestMessage.text);
+      } else if ((!latestMessage || (latestMessage && latestMessage.senderId === currentUser?.uid)) && !replyingToMessage ) {
+          // Clear suggestions if current user sent the last message or no messages, and not in reply mode
           setAiSuggestions([]);
           setLoadingAiSuggestions(false);
       }
@@ -166,7 +174,7 @@ export default function IndividualChatPage() {
       console.error("Error fetching messages:", error);
     });
     return () => unsubscribeMessages();
-  }, [chatId, currentUser?.uid]);
+  }, [chatId, currentUser?.uid, replyingToMessage]); // Added replyingToMessage to dependency array
 
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
@@ -207,12 +215,23 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      setReplyingToMessage(null);
-      setAiSuggestions([]); // Clear AI suggestions after sending a message
+      setReplyingToMessage(null); // This will also clear AI suggestions if they were for the reply
+      setAiSuggestions([]); 
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  const handleSetReplyingToMessage = (message: ChatMessage | null) => {
+    setReplyingToMessage(message);
+    if (message) {
+      fetchAiSuggestions(message.text);
+      inputRef.current?.focus();
+    } else {
+      setAiSuggestions([]); // Clear suggestions if cancelling reply
+      setLoadingAiSuggestions(false);
     }
   };
   
@@ -226,8 +245,9 @@ export default function IndividualChatPage() {
       if (rtdbPartnerStatus.isOnline) return <span className="text-xs text-green-500">Online</span>;
       if (rtdbPartnerStatus.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
     } else if (chatPartner) {
-      if (chatPartner.isOnline) return <span className="text-xs text-green-500">Online</span>;
-      if (chatPartner.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(chatPartner.lastSeen)}</span>;
+      // Fallback to Firestore data if RTDB not available, though RTDB should be primary for presence
+      if ((chatPartner as User).isOnline) return <span className="text-xs text-green-500">Online</span>;
+      if ((chatPartner as User).lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime((chatPartner as User).lastSeen!)}</span>;
     }
     return <span className="text-xs text-muted-foreground">Offline</span>;
   };
@@ -278,7 +298,7 @@ export default function IndividualChatPage() {
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex items-end gap-2 group ${ // Added group for hover effects
+              className={`flex items-end gap-2 group ${ 
                 msg.senderId === currentUser?.uid ? "justify-end" : "justify-start"
               }`}
             >
@@ -294,9 +314,9 @@ export default function IndividualChatPage() {
                   }`}
                 >
                   {msg.replyTo && msg.repliedMessageText && (
-                    <div className={`mb-2 p-2 rounded-md text-xs ${ msg.senderId === currentUser?.uid ? 'bg-blue-300 text-blue-800' : 'bg-muted'}`}>
-                      <p className="font-semibold">{msg.repliedMessageSender === (currentUser?.displayName || currentUser?.email) ? "You" : msg.repliedMessageSender}</p>
-                      <p className="opacity-80 truncate">{msg.repliedMessageText}</p>
+                    <div className={`mb-2 p-2 rounded-lg text-xs min-w-0 ${ msg.senderId === currentUser?.uid ? 'bg-primary/60' : 'bg-muted'}`}>
+                      <p className="font-semibold text-sm">{msg.repliedMessageSender === (currentUser?.displayName || currentUser?.email) ? "You" : msg.repliedMessageSender}</p>
+                      <p className="opacity-80 break-words">{msg.repliedMessageText}</p>
                     </div>
                   )}
                   <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
@@ -313,7 +333,7 @@ export default function IndividualChatPage() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
-                    onClick={() => setReplyingToMessage(msg)}
+                    onClick={() => handleSetReplyingToMessage(msg)}
                     aria-label="Reply to message"
                 >
                     <MessageSquareReply className="h-4 w-4" />
@@ -337,7 +357,7 @@ export default function IndividualChatPage() {
       <footer className="border-t bg-card">
         {replyingToMessage && (
           <div className="p-2.5 border-b bg-background/80 flex justify-between items-center">
-            <div className="overflow-hidden">
+            <div className="overflow-hidden flex-1 min-w-0">
               <p className="text-xs font-semibold text-primary">
                 Replying to {replyingToMessage.senderId === currentUser?.uid ? "yourself" : (replyingToMessage.senderDisplayName || "User")}
               </p>
@@ -345,7 +365,7 @@ export default function IndividualChatPage() {
                 {replyingToMessage.text}
               </p>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => setReplyingToMessage(null)} className="text-muted-foreground hover:text-destructive">
+            <Button variant="ghost" size="icon" onClick={() => handleSetReplyingToMessage(null)} className="text-muted-foreground hover:text-destructive">
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -390,7 +410,7 @@ export default function IndividualChatPage() {
             value={newMessage}
             onChange={(e) => {
                 setNewMessage(e.target.value);
-                if (e.target.value.trim() !== '' && aiSuggestions.length > 0) {
+                if (e.target.value.trim() !== '' && aiSuggestions.length > 0 && !replyingToMessage) {
                     setAiSuggestions([]); 
                 }
             }}
@@ -416,3 +436,4 @@ export default function IndividualChatPage() {
     </div>
   );
 }
+
