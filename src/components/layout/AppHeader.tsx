@@ -13,8 +13,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CustomAvatar } from "@/components/common/CustomAvatar";
 import { useAuth } from "@/hooks/useAuth";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase"; // Import db
 import { signOut } from "firebase/auth";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore"; // Import doc, serverTimestamp, updateDoc
 import { useRouter } from "next/navigation";
 import { LogOut, User as UserIconLucide, Settings, LifeBuoy } from "lucide-react";
 import { LogoIcon } from "@/components/icons/LogoIcon";
@@ -24,6 +25,17 @@ export function AppHeader() {
   const router = useRouter();
 
   const handleSignOut = async () => {
+    if (user) {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+          isOnline: false,
+          lastSeen: serverTimestamp(),
+        });
+      } catch (error) {
+        console.error("Error updating user status on sign out:", error);
+      }
+    }
     await signOut(auth);
     router.push("/login");
   };

@@ -10,7 +10,7 @@ import { ArrowLeft, Paperclip, SendHorizonal, Smile, Mic, Phone, Video, Info, Lo
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useState, useEffect, useRef, FormEvent } from "react";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase"; // Import auth
 import {
   doc,
   getDoc,
@@ -25,9 +25,10 @@ import {
   arrayUnion
 } from "firebase/firestore";
 import type { User, ChatMessage, Chat } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/utils"; // Import the new utility
 
-// Helper function to format timestamp
-const formatTimestamp = (timestamp: Timestamp | Date | undefined): string => {
+// Helper function to format timestamp for messages
+const formatMessageTimestamp = (timestamp: Timestamp | Date | undefined): string => {
   if (!timestamp) return "";
   const date = timestamp instanceof Timestamp ? timestamp.toDate() : timestamp;
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -53,7 +54,7 @@ export default function IndividualChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch chat details and participant info
+  // Fetch chat details and participant info (including real-time updates for partner status)
   useEffect(() => {
     if (!chatId || !currentUser?.uid) return;
 
@@ -69,31 +70,46 @@ export default function IndividualChatPage() {
         if (!chatData.isGroup && chatData.participants) {
           const partnerId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (partnerId) {
+            // Subscribe to real-time updates for the chat partner's user document
             const userDocRef = doc(db, "users", partnerId);
-            const userSnap = await getDoc(userDocRef);
-            if (userSnap.exists()) {
-              setChatPartner(userSnap.data() as User);
-            } else {
-              console.warn("Chat partner user document not found:", partnerId);
-              setChatPartner(null); 
-            }
+            return onSnapshot(userDocRef, (userSnap) => {
+              if (userSnap.exists()) {
+                setChatPartner(userSnap.data() as User);
+              } else {
+                console.warn("Chat partner user document not found:", partnerId);
+                setChatPartner(null); 
+              }
+              setLoadingChat(false); // Set loading to false after partner data is fetched/updated
+            }, (error) => {
+              console.error("Error fetching chat partner details:", error);
+              setLoadingChat(false);
+            });
+          } else {
+            setLoadingChat(false); // No partner ID found
           }
         } else if (chatData.isGroup) {
           setChatPartner(null); 
+          setLoadingChat(false);
+        } else {
+           setLoadingChat(false); // Not a group and no participants somehow
         }
       } else {
         console.error("Chat not found!");
         setChatDetails(null);
         setChatPartner(null);
+        setLoadingChat(false);
       }
-      setLoadingChat(false);
     }, (error) => {
       console.error("Error fetching chat details:", error);
       setLoadingChat(false);
     });
 
-    return () => unsubscribeChatDetails();
-  }, [chatId, currentUser?.uid, router]);
+    return () => {
+      unsubscribeChatDetails();
+      // The partner snapshot listener is returned by the onSnapshot call itself,
+      // so it will be cleaned up when unsubscribeChatDetails is called if it was set up.
+    };
+  }, [chatId, currentUser?.uid]);
 
   // Fetch messages
   useEffect(() => {
@@ -156,6 +172,18 @@ export default function IndividualChatPage() {
   const partnerName = chatDetails?.isGroup ? chatDetails.groupName : chatPartner?.displayName;
   const partnerAvatar = chatDetails?.isGroup ? chatDetails.groupAvatar : chatPartner?.photoURL;
   const partnerDataAiHint = chatDetails?.isGroup ? "group avatar" : (chatPartner as any)?.dataAiHint || "person avatar";
+  
+  const getPartnerStatus = () => {
+    if (chatDetails?.isGroup) return null; // No individual status for group chats header
+    if (!chatPartner) return <span className="text-xs text-muted-foreground">Loading status...</span>;
+    if (chatPartner.isOnline) {
+      return <span className="text-xs text-green-500">Online</span>;
+    }
+    if (chatPartner.lastSeen) {
+      return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(chatPartner.lastSeen)}</span>;
+    }
+    return <span className="text-xs text-muted-foreground">Offline</span>;
+  };
 
 
   if (loadingChat) {
@@ -194,8 +222,7 @@ export default function IndividualChatPage() {
           {!partnerAvatar && <CustomAvatar fallback={partnerName?.charAt(0) || "?"} alt={partnerName || "Chat partner"} className="h-10 w-10" data-ai-hint={partnerDataAiHint} />}
           <div>
             <h2 className="font-semibold text-foreground">{partnerName || "Chat"}</h2>
-            {/* Online/Last Seen Status - Placeholder */}
-            {/* <p className="text-xs text-muted-foreground">Online</p> */}
+            {getPartnerStatus()}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -239,18 +266,11 @@ export default function IndividualChatPage() {
                 <p className="text-sm">{msg.text}</p>
                 <div className="flex items-center justify-end gap-1 mt-1">
                     <p className={`text-xs ${msg.senderId === currentUser?.uid ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                    {formatTimestamp(msg.timestamp)}
+                    {formatMessageTimestamp(msg.timestamp)}
                     </p>
                     {msg.senderId === currentUser?.uid && msg.status === 'sent' && (
                         <Check className="h-3.5 w-3.5 text-primary-foreground/70" />
                     )}
-                    {/* Placeholder for other statuses */}
-                    {/* {msg.senderId === currentUser?.uid && msg.status === 'delivered' && (
-                        <Check className="h-3.5 w-3.5 text-blue-300" /> // Example: Delivered tick
-                    )}
-                    {msg.senderId === currentUser?.uid && msg.status === 'read' && (
-                        <Check className="h-3.5 w-3.5 text-green-300" /> // Example: Read tick
-                    )} */}
                 </div>
               </div>
               {msg.senderId === currentUser?.uid && currentUser?.photoURL && (
@@ -311,5 +331,3 @@ export default function IndividualChatPage() {
     </div>
   );
 }
-
-    
