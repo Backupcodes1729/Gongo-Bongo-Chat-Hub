@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -43,7 +44,9 @@ export function AppHeader() {
                 <CustomAvatar
                   src={user.photoURL}
                   alt={user.displayName || user.email || "User"}
+                  fallback={(user.displayName || user.email || "U").charAt(0).toUpperCase()}
                   className="h-9 w-9"
+                  data-ai-hint="person avatar"
                 />
               </Button>
             </DropdownMenuTrigger>
@@ -59,11 +62,11 @@ export function AppHeader() {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/settings')}>
                 <UserIconLucide className="mr-2 h-4 w-4" />
                 <span>Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
               </DropdownMenuItem>
