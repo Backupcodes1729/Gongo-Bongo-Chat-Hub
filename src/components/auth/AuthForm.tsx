@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from "react";
@@ -9,12 +10,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { Loader2, AlertTriangle } from "lucide-react";
-import { LogoIcon } from "@/components/icons/LogoIcon"; // Assuming you have a LogoIcon
+import { LogoIcon } from "@/components/icons/LogoIcon";
 
 const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
@@ -22,6 +23,7 @@ const loginSchema = z.object({
 });
 
 const signupSchema = z.object({
+  displayName: z.string().min(3, { message: "Display name must be at least 3 characters" }).max(30, { message: "Display name must be at most 30 characters" }),
   email: z.string().email({ message: "Invalid email address" }),
   password: z.string().min(6, { message: "Password must be at least 6 characters" }),
   confirmPassword: z.string().min(6, { message: "Password must be at least 6 characters" }),
@@ -82,13 +84,20 @@ export function AuthForm() {
     setIsLoading(true);
     setError(null);
     try {
-      await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      // Update Firebase Auth profile with display name
+      if (userCredential.user) {
+        await updateProfile(userCredential.user, {
+          displayName: data.displayName,
+          // photoURL can be set here later if we allow avatar upload during signup
+        });
+      }
+      // The AuthProvider will handle Firestore document creation with the updated displayName
       toast({ title: "Success", description: "Account created successfully. Please log in." });
-      setActiveTab("login"); // Switch to login tab after successful signup
-      loginForm.reset(); // Reset login form
-      signupForm.reset(); // Reset signup form
-    } catch (err: any)
-     {
+      setActiveTab("login"); 
+      loginForm.reset({ email: data.email }); 
+      signupForm.reset(); 
+    } catch (err: any) {
       setError(err.message);
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
@@ -141,6 +150,13 @@ export function AuthForm() {
           </TabsContent>
           <TabsContent value="signup">
             <form onSubmit={signupForm.handleSubmit(onSignupSubmit)} className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label htmlFor="signup-displayName">Display Name</Label>
+                <Input id="signup-displayName" type="text" placeholder="Your Name" {...signupForm.register("displayName")} />
+                {signupForm.formState.errors.displayName && (
+                  <p className="text-sm text-destructive">{signupForm.formState.errors.displayName.message}</p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="signup-email">Email</Label>
                 <Input id="signup-email" type="email" placeholder="m@example.com" {...signupForm.register("email")} />
@@ -203,14 +219,14 @@ export function AuthForm() {
         {activeTab === "login" ? (
           <p>
             Don't have an account?{" "}
-            <Button variant="link" className="p-0 h-auto" onClick={() => setActiveTab("signup")}>
+            <Button variant="link" className="p-0 h-auto" onClick={() => { signupForm.reset(); setError(null); setActiveTab("signup");}}>
               Sign up
             </Button>
           </p>
         ) : (
           <p>
             Already have an account?{" "}
-            <Button variant="link" className="p-0 h-auto" onClick={() => setActiveTab("login")}>
+            <Button variant="link" className="p-0 h-auto" onClick={() => { loginForm.reset(); setError(null); setActiveTab("login");}}>
               Login
             </Button>
           </p>
@@ -219,3 +235,5 @@ export function AuthForm() {
     </Card>
   );
 }
+
+    
