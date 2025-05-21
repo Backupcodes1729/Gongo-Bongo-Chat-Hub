@@ -85,12 +85,6 @@ export default function IndividualChatPage() {
     let unsubscribePartnerFirestore: Unsubscribe | null = null; 
 
     const unsubscribeChatDetails = onSnapshot(chatDocRef, async (docSnap) => {
-      if (unsubscribePartnerFirestore) { 
-        unsubscribePartnerFirestore();
-        unsubscribePartnerFirestore = null;
-      }
-      setChatPartner(null); 
-
       if (docSnap.exists()) {
         const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
         setChatDetails(chatData);
@@ -99,6 +93,11 @@ export default function IndividualChatPage() {
           const partnerId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (partnerId) {
             const userDocRef = doc(db, "users", partnerId);
+             // Clean up previous listener if it exists and points to a different partner
+            if (unsubscribePartnerFirestore) {
+                unsubscribePartnerFirestore();
+                unsubscribePartnerFirestore = null;
+            }
             unsubscribePartnerFirestore = onSnapshot(userDocRef, (userSnap) => {
               if (userSnap.exists()) {
                 setChatPartner(userSnap.data() as User);
@@ -106,19 +105,37 @@ export default function IndividualChatPage() {
                 setChatPartner(null);
               }
             });
+          } else { // No partnerId found (e.g. chat with self, or inconsistent data)
+             if (unsubscribePartnerFirestore) {
+                unsubscribePartnerFirestore();
+                unsubscribePartnerFirestore = null;
+            }
+            setChatPartner(null);
           }
         } else if (chatData.isGroup) {
+           if (unsubscribePartnerFirestore) {
+                unsubscribePartnerFirestore();
+                unsubscribePartnerFirestore = null;
+            }
           setChatPartner(null); 
         }
       } else {
         setChatDetails(null);
         setChatPartner(null);
+        if (unsubscribePartnerFirestore) {
+            unsubscribePartnerFirestore();
+            unsubscribePartnerFirestore = null;
+        }
       }
       setLoadingChat(false);
     }, (error) => {
       console.error("Error fetching chat details (Firestore):", error);
       setChatDetails(null);
       setChatPartner(null);
+      if (unsubscribePartnerFirestore) {
+        unsubscribePartnerFirestore();
+        unsubscribePartnerFirestore = null;
+      }
       setLoadingChat(false);
     });
 
@@ -277,7 +294,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); 
+      handleSetReplyingToMessage(null); // Clear reply mode & AI suggestions
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -368,10 +385,10 @@ export default function IndividualChatPage() {
               )}
               <div className={`flex items-center gap-2 ${msg.senderId === currentUser?.uid ? 'flex-row-reverse' : 'flex-row'}`}>
                 <div
-                  className={`max-w-[70%] p-3 shadow ${
+                  className={`min-w-32 max-w-[70%] p-3 shadow ${
                     msg.senderId === currentUser?.uid
-                      ? "bg-primary text-primary-foreground rounded-xl rounded-bl-none" // Sent: Tail on bottom-left
-                      : "bg-card text-card-foreground rounded-xl rounded-br-none border" // Received: Tail on bottom-right
+                      ? "bg-primary text-primary-foreground rounded-xl rounded-bl-none"
+                      : "bg-card text-card-foreground rounded-xl rounded-br-none border"
                   }`}
                 >
                   {msg.replyTo && msg.repliedMessageText && (
@@ -488,6 +505,7 @@ export default function IndividualChatPage() {
             onChange={(e) => {
                 setNewMessage(e.target.value);
                 if (e.target.value.trim() !== '' && aiSuggestions.length > 0) {
+                    // Clear suggestions if the typed message no longer starts with any suggestion
                     if (!aiSuggestions.some(suggestion => e.target.value.startsWith(suggestion))) {
                          setAiSuggestions([]);
                     }
