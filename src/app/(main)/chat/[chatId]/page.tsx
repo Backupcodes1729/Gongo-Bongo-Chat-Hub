@@ -79,7 +79,7 @@ export default function IndividualChatPage() {
     }
     setLoadingChat(true);
     const chatDocRef = doc(db, "chats", chatId);
-    let unsubscribePartner Firestore: Unsubscribe | null = null;
+    let unsubscribePartnerFirestore: Unsubscribe | null = null; // Corrected typo here
 
     const unsubscribeChatDetails = onSnapshot(chatDocRef, async (docSnap) => {
       if (unsubscribePartnerFirestore) { // Clean up previous partner listener if chatDetails change
@@ -436,7 +436,7 @@ export default function IndividualChatPage() {
             onChange={(e) => {
                 setNewMessage(e.target.value);
                 if (e.target.value.trim() !== '' && aiSuggestions.length > 0) {
-                    if (!aiSuggestions.includes(e.target.value)) {
+                    if (!aiSuggestions.some(suggestion => e.target.value.startsWith(suggestion))) {
                          setAiSuggestions([]);
                     }
                 }
