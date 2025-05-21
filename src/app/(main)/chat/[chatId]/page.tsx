@@ -60,7 +60,6 @@ export default function IndividualChatPage() {
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const lastProcessedMessageIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
 
@@ -84,15 +83,23 @@ export default function IndividualChatPage() {
           const partnerId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (partnerId) {
             const userDocRef = doc(db, "users", partnerId);
-            const userSnap = await getDoc(userDocRef);
-            if (userSnap.exists()) {
-              setChatPartner(userSnap.data() as User);
-            } else {
-              setChatPartner(null);
+            // Listen for real-time updates to partner's Firestore document for fallback info
+            const unsubscribePartner = onSnapshot(userDocRef, (userSnap) => {
+              if (userSnap.exists()) {
+                setChatPartner(userSnap.data() as User);
+              } else {
+                setChatPartner(null);
+              }
+            });
+            // Store unsubscribe function to call on cleanup
+            // This might need a more sophisticated way to manage if layout changes
+            // For now, it's tied to chatDetails subscription
+            return () => {
+              unsubscribePartner();
             }
           }
         } else if (chatData.isGroup) {
-          setChatPartner(null);
+          setChatPartner(null); // Clear partner if it's a group or becomes one
         }
       } else {
         setChatDetails(null);
@@ -161,20 +168,14 @@ export default function IndividualChatPage() {
       });
       setMessages(fetchedMessages);
 
-      const latestMessage = fetchedMessages.length > 0 ? fetchedMessages[fetchedMessages.length - 1] : null;
-      if (latestMessage && latestMessage.senderId !== currentUser?.uid && latestMessage.id !== lastProcessedMessageIdRef.current && !replyingToMessage) {
-        lastProcessedMessageIdRef.current = latestMessage.id;
-        fetchAiSuggestions(latestMessage.text);
-      } else if ((!latestMessage || (latestMessage && latestMessage.senderId === currentUser?.uid)) && !replyingToMessage ) {
-          setAiSuggestions([]);
-          setLoadingAiSuggestions(false);
-      }
-
+      // AI suggestions are now only triggered by handleSetReplyingToMessage
+      // No automatic fetching for new incoming messages here.
+      
     }, (error) => {
       console.error("Error fetching messages:", error);
     });
     return () => unsubscribeMessages();
-  }, [chatId, currentUser?.uid, replyingToMessage]); 
+  }, [chatId, currentUser?.uid]); 
 
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
@@ -215,7 +216,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); 
+      handleSetReplyingToMessage(null); // This will clear reply mode and suggestions
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -226,16 +227,12 @@ export default function IndividualChatPage() {
   const handleSetReplyingToMessage = (message: ChatMessage | null) => {
     setReplyingToMessage(message);
     if (message) {
-      fetchAiSuggestions(message.text);
+      fetchAiSuggestions(message.text); // Fetch suggestions for the message being replied to
       inputRef.current?.focus();
     } else {
+      // Clear suggestions when not in reply mode or reply is cancelled
       setAiSuggestions([]); 
       setLoadingAiSuggestions(false);
-      // If there are existing messages and the last one is from partner, fetch suggestions for it
-      const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-      if (latestMessage && latestMessage.senderId !== currentUser?.uid) {
-        fetchAiSuggestions(latestMessage.text);
-      }
     }
   };
   
@@ -249,7 +246,6 @@ export default function IndividualChatPage() {
       if (rtdbPartnerStatus.isOnline) return <span className="text-xs text-green-500">Online</span>;
       if (rtdbPartnerStatus.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
     } else if (chatPartner) {
-      // Fallback to Firestore status if RTDB not available (though RTDB should be primary)
       if ((chatPartner as User).isOnline) return <span className="text-xs text-green-500">Online</span>;
       if ((chatPartner as User).lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime((chatPartner as User).lastSeen!)}</span>;
     }
@@ -430,8 +426,14 @@ export default function IndividualChatPage() {
             value={newMessage}
             onChange={(e) => {
                 setNewMessage(e.target.value);
-                if (e.target.value.trim() !== '' && aiSuggestions.length > 0 && !replyingToMessage) {
-                    setAiSuggestions([]); 
+                // Clear suggestions if user starts typing their own reply,
+                // even if in reply mode, unless they just clicked a suggestion.
+                if (e.target.value.trim() !== '' && aiSuggestions.length > 0) {
+                    // Check if the current input value is one of the suggestions.
+                    // If it is, don't clear. Otherwise, clear.
+                    if (!aiSuggestions.includes(e.target.value)) {
+                         setAiSuggestions([]);
+                    }
                 }
             }}
             className="flex-1 bg-background focus:bg-background/90"
