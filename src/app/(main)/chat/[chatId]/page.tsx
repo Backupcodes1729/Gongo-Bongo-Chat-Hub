@@ -306,6 +306,7 @@ export default function IndividualChatPage() {
       if (rtdbPartnerStatus.isOnline) return <span className="text-xs text-green-500">Online</span>;
       if (rtdbPartnerStatus.lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime(rtdbPartnerStatus.lastSeen)}</span>;
     } else if (chatPartner) {
+      // Fallback to Firestore status if RTDB is not available for some reason
       if ((chatPartner as User).isOnline) return <span className="text-xs text-green-500">Online</span>;
       if ((chatPartner as User).lastSeen) return <span className="text-xs text-muted-foreground">Last seen {formatRelativeTime((chatPartner as User).lastSeen!)}</span>;
     }
@@ -367,7 +368,7 @@ export default function IndividualChatPage() {
               )}
               <div className={`flex items-center gap-2 ${msg.senderId === currentUser?.uid ? 'flex-row-reverse' : 'flex-row'}`}>
                 <div
-                  className={`max-w-[70%] p-3 rounded-xl shadow ${
+                  className={`max-w-[70%] p-3 shadow ${
                     msg.senderId === currentUser?.uid
                       ? "bg-primary text-primary-foreground rounded-xl rounded-bl-none" // Sent: Tail on bottom-left
                       : "bg-card text-card-foreground rounded-xl rounded-br-none border" // Received: Tail on bottom-right
@@ -514,4 +515,3 @@ export default function IndividualChatPage() {
     </div>
   );
 }
-
