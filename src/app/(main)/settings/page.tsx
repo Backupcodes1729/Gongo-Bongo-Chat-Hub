@@ -34,7 +34,7 @@ export default function SettingsPage() {
   });
   const [desktopNotificationPermission, setDesktopNotificationPermission] = useState<NotificationPermission>('default');
 
-  // Effect to set initial theme and load notification settings
+  // Effect to set initial theme, load notification settings, and check permissions
   useEffect(() => {
     setIsMounted(true);
     const storedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -44,15 +44,20 @@ export default function SettingsPage() {
       setTheme('dark');
     }
 
-    // Load notification settings from localStorage
     const storedNotificationSettings = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
     if (storedNotificationSettings) {
-      setNotificationSettings(JSON.parse(storedNotificationSettings));
+      try {
+        setNotificationSettings(JSON.parse(storedNotificationSettings));
+      } catch (e) {
+        console.error("Error parsing notification settings from localStorage", e);
+      }
     }
 
-    // Check current desktop notification permission
     if ('Notification' in window) {
       setDesktopNotificationPermission(Notification.permission);
+      console.log("Initial Notification.permission:", Notification.permission);
+    } else {
+      console.warn("Desktop notifications not supported by this browser.");
     }
   }, []);
 
@@ -86,32 +91,35 @@ export default function SettingsPage() {
       return;
     }
 
-    if (checked) {
+    console.log("Attempting to change desktop notifications. Current permission:", desktopNotificationPermission, "Requested state:", checked);
+
+    if (checked) { // User wants to enable notifications
       if (desktopNotificationPermission === 'granted') {
         setNotificationSettings(prev => ({ ...prev, desktopEnabled: true }));
+        toast({ title: "Preference Saved", description: "Desktop notifications enabled." });
       } else if (desktopNotificationPermission === 'default') {
         const permission = await Notification.requestPermission();
-        setDesktopNotificationPermission(permission);
+        setDesktopNotificationPermission(permission); // Update state with new permission
         if (permission === 'granted') {
           setNotificationSettings(prev => ({ ...prev, desktopEnabled: true }));
           toast({ title: "Success", description: "Desktop notifications enabled." });
         } else {
-          toast({ title: "Info", description: "Desktop notifications permission not granted." });
           setNotificationSettings(prev => ({ ...prev, desktopEnabled: false })); // Ensure it's off if not granted
+          toast({ title: "Permission Not Granted", description: `Desktop notifications permission was ${permission}. You may need to allow them in browser settings.`, variant: "destructive" });
         }
       } else if (desktopNotificationPermission === 'denied') {
-        toast({ title: "Permission Denied", description: "Desktop notifications are blocked. Please enable them in your browser settings.", variant: "destructive" });
-         setNotificationSettings(prev => ({ ...prev, desktopEnabled: false })); // Ensure it's off
+        setNotificationSettings(prev => ({ ...prev, desktopEnabled: false })); // Ensure it's off
+        toast({ title: "Permission Denied", description: "Desktop notifications are blocked. Please enable them in your browser/OS settings for this site.", variant: "destructive" });
       }
-    } else {
+    } else { // User wants to disable notifications
       setNotificationSettings(prev => ({ ...prev, desktopEnabled: false }));
+      toast({ title: "Preference Saved", description: "Desktop notifications disabled." });
     }
   };
 
   const handleEmailNotificationChange = (checked: boolean) => {
     setNotificationSettings(prev => ({ ...prev, emailEnabled: checked }));
-    // Actual email sending logic would be backend-based
-    toast({ title: "Preference Saved", description: `Email notifications ${checked ? 'enabled' : 'disabled'}.`});
+    toast({ title: "Preference Saved", description: `Email notifications ${checked ? 'enabled' : 'disabled'}. (Backend not implemented)`});
   };
   
   const handleSoundNotificationChange = (checked: boolean) => {
@@ -119,16 +127,12 @@ export default function SettingsPage() {
     toast({ title: "Preference Saved", description: `Sound notifications ${checked ? 'enabled' : 'disabled'}.`});
   };
 
-
   if (!isMounted) {
     return null; 
   }
 
   const isDesktopSwitchDisabled = desktopNotificationPermission === 'denied';
-  // The switch should reflect the stored preference IF permission is granted,
-  // otherwise, it should be off if permission is not granted.
-  const desktopSwitchChecked = desktopNotificationPermission === 'granted' && notificationSettings.desktopEnabled;
-
+  const desktopSwitchChecked = (desktopNotificationPermission === 'granted' && notificationSettings.desktopEnabled);
 
   return (
     <div className="flex flex-col h-full p-4 sm:p-6 md:p-8 bg-background">
@@ -179,13 +183,16 @@ export default function SettingsPage() {
             </CardTitle>
             <CardDescription>Manage your notification preferences.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6"> {/* Increased spacing for better visual separation */}
+          <CardContent className="space-y-6">
             <div className="flex items-center justify-between">
-              <Label htmlFor="desktopNotifications" className="flex flex-col space-y-1 cursor-pointer">
+              <Label htmlFor="desktopNotifications" className={`flex flex-col space-y-1 ${isDesktopSwitchDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
                 <span>Desktop Notifications</span>
                 <span className="font-normal leading-snug text-muted-foreground text-xs sm:text-sm">
                   Receive notifications on your computer.
                 </span>
+                 {desktopNotificationPermission === 'denied' && (
+                  <span className="text-xs text-destructive">Permission blocked in browser.</span>
+                )}
               </Label>
               <Switch 
                 id="desktopNotifications" 
