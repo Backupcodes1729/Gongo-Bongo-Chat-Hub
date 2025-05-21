@@ -23,7 +23,8 @@ import {
   serverTimestamp,
   Timestamp,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  Unsubscribe
 } from "firebase/firestore";
 import type { User, ChatMessage, Chat } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/utils";
@@ -70,36 +71,42 @@ export default function IndividualChatPage() {
   }, [messages]);
 
   useEffect(() => {
-    if (!chatId || !currentUser?.uid) return;
+    if (!chatId || !currentUser?.uid) {
+        if (!currentUser?.uid && chatId) { // If chat ID exists but user is somehow not loaded, stop loading
+            setLoadingChat(false);
+        }
+        return;
+    }
     setLoadingChat(true);
     const chatDocRef = doc(db, "chats", chatId);
+    let unsubscribePartner Firestore: Unsubscribe | null = null;
 
     const unsubscribeChatDetails = onSnapshot(chatDocRef, async (docSnap) => {
+      if (unsubscribePartnerFirestore) { // Clean up previous partner listener if chatDetails change
+        unsubscribePartnerFirestore();
+        unsubscribePartnerFirestore = null;
+      }
+      setChatPartner(null); // Reset chat partner on chat detail update initially
+
       if (docSnap.exists()) {
         const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
         setChatDetails(chatData);
 
-        if (!chatData.isGroup && chatData.participants) {
+        if (!chatData.isGroup && chatData.participants && currentUser?.uid) {
           const partnerId = chatData.participants.find(pId => pId !== currentUser.uid);
           if (partnerId) {
             const userDocRef = doc(db, "users", partnerId);
-            // Listen for real-time updates to partner's Firestore document for fallback info
-            const unsubscribePartner = onSnapshot(userDocRef, (userSnap) => {
+            unsubscribePartnerFirestore = onSnapshot(userDocRef, (userSnap) => {
               if (userSnap.exists()) {
                 setChatPartner(userSnap.data() as User);
               } else {
                 setChatPartner(null);
               }
             });
-            // Store unsubscribe function to call on cleanup
-            // This might need a more sophisticated way to manage if layout changes
-            // For now, it's tied to chatDetails subscription
-            return () => {
-              unsubscribePartner();
-            }
           }
         } else if (chatData.isGroup) {
-          setChatPartner(null); // Clear partner if it's a group or becomes one
+          // Group chat logic, setChatPartner to null or relevant group info if needed
+          setChatPartner(null); 
         }
       } else {
         setChatDetails(null);
@@ -108,10 +115,17 @@ export default function IndividualChatPage() {
       setLoadingChat(false);
     }, (error) => {
       console.error("Error fetching chat details (Firestore):", error);
+      setChatDetails(null);
+      setChatPartner(null);
       setLoadingChat(false);
     });
 
-    return () => unsubscribeChatDetails();
+    return () => {
+      unsubscribeChatDetails();
+      if (unsubscribePartnerFirestore) {
+        unsubscribePartnerFirestore();
+      }
+    };
   }, [chatId, currentUser?.uid]);
 
   useEffect(() => {
@@ -167,10 +181,6 @@ export default function IndividualChatPage() {
         fetchedMessages.push({ id: doc.id, ...doc.data() } as ChatMessage);
       });
       setMessages(fetchedMessages);
-
-      // AI suggestions are now only triggered by handleSetReplyingToMessage
-      // No automatic fetching for new incoming messages here.
-      
     }, (error) => {
       console.error("Error fetching messages:", error);
     });
@@ -216,7 +226,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); // This will clear reply mode and suggestions
+      handleSetReplyingToMessage(null); 
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -227,10 +237,9 @@ export default function IndividualChatPage() {
   const handleSetReplyingToMessage = (message: ChatMessage | null) => {
     setReplyingToMessage(message);
     if (message) {
-      fetchAiSuggestions(message.text); // Fetch suggestions for the message being replied to
+      fetchAiSuggestions(message.text); 
       inputRef.current?.focus();
     } else {
-      // Clear suggestions when not in reply mode or reply is cancelled
       setAiSuggestions([]); 
       setLoadingAiSuggestions(false);
     }
@@ -314,7 +323,7 @@ export default function IndividualChatPage() {
                   }`}
                 >
                   {msg.replyTo && msg.repliedMessageText && (
-                    <div className={`mb-1.5 pl-2.5 py-1 pr-1 border-l-2 min-w-0 ${
+                     <div className={`mb-1.5 pl-2.5 py-1 pr-1 border-l-2 min-w-0 ${
                         msg.senderId === currentUser?.uid
                             ? 'border-primary-foreground/60'
                             : 'border-accent'
@@ -355,7 +364,7 @@ export default function IndividualChatPage() {
                     <MessageSquareReply className="h-4 w-4" />
                 </Button>
               </div>
-              {msg.senderId === currentUser?.uid && (
+              {msg.senderId === currentUser?.uid && currentUser && (
                   <CustomAvatar 
                     src={currentUser.photoURL} 
                     alt={currentUser.displayName || "You"} 
@@ -371,7 +380,7 @@ export default function IndividualChatPage() {
       </ScrollArea>
       
       <footer className="border-t bg-card">
-        {replyingToMessage && (
+        {replyingToMessage && currentUser && (
           <div className="p-2.5 border-b bg-background/80 flex justify-between items-center">
             <div className="overflow-hidden flex-1 min-w-0">
               <p className="text-xs font-semibold text-primary">
@@ -426,11 +435,7 @@ export default function IndividualChatPage() {
             value={newMessage}
             onChange={(e) => {
                 setNewMessage(e.target.value);
-                // Clear suggestions if user starts typing their own reply,
-                // even if in reply mode, unless they just clicked a suggestion.
                 if (e.target.value.trim() !== '' && aiSuggestions.length > 0) {
-                    // Check if the current input value is one of the suggestions.
-                    // If it is, don't clear. Otherwise, clear.
                     if (!aiSuggestions.includes(e.target.value)) {
                          setAiSuggestions([]);
                     }
