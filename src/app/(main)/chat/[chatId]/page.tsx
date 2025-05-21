@@ -30,6 +30,8 @@ import type { User, ChatMessage, Chat } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/utils";
 import { suggestReply, type SuggestReplyInput, type SuggestReplyOutput } from "@/ai/flows/suggest-reply";
 
+const NOTIFICATION_SETTINGS_KEY = 'gongoBongoNotificationSettings';
+
 const formatMessageTimestamp = (timestamp: Timestamp | Date | undefined): string => {
   if (!timestamp) return "";
   const date = timestamp instanceof Timestamp ? timestamp.toDate() : timestamp;
@@ -62,6 +64,7 @@ export default function IndividualChatPage() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const previousMessagesRef = useRef<ChatMessage[]>([]);
 
 
   useEffect(() => {
@@ -72,21 +75,21 @@ export default function IndividualChatPage() {
 
   useEffect(() => {
     if (!chatId || !currentUser?.uid) {
-        if (!currentUser?.uid && chatId) { // If chat ID exists but user is somehow not loaded, stop loading
+        if (!currentUser?.uid && chatId) { 
             setLoadingChat(false);
         }
         return;
     }
     setLoadingChat(true);
     const chatDocRef = doc(db, "chats", chatId);
-    let unsubscribePartnerFirestore: Unsubscribe | null = null; // Corrected typo here
+    let unsubscribePartnerFirestore: Unsubscribe | null = null; 
 
     const unsubscribeChatDetails = onSnapshot(chatDocRef, async (docSnap) => {
-      if (unsubscribePartnerFirestore) { // Clean up previous partner listener if chatDetails change
+      if (unsubscribePartnerFirestore) { 
         unsubscribePartnerFirestore();
         unsubscribePartnerFirestore = null;
       }
-      setChatPartner(null); // Reset chat partner on chat detail update initially
+      setChatPartner(null); 
 
       if (docSnap.exists()) {
         const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
@@ -105,7 +108,6 @@ export default function IndividualChatPage() {
             });
           }
         } else if (chatData.isGroup) {
-          // Group chat logic, setChatPartner to null or relevant group info if needed
           setChatPartner(null); 
         }
       } else {
@@ -187,6 +189,61 @@ export default function IndividualChatPage() {
     return () => unsubscribeMessages();
   }, [chatId, currentUser?.uid]); 
 
+  // Effect for handling notifications for new messages
+  useEffect(() => {
+    if (!currentUser || !messages.length || !chatDetails) {
+      previousMessagesRef.current = [...messages]; // Keep ref updated even if no notification
+      return;
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    const isInitialLoad = previousMessagesRef.current.length === 0 && messages.length > 0;
+    
+    // Only process if it's not the initial load and the last message is new and from the partner
+    const isNewMessageFromPartner = 
+      lastMessage.senderId !== currentUser.uid &&
+      (!previousMessagesRef.current.find(msg => msg.id === lastMessage.id) || 
+       (previousMessagesRef.current.length > 0 && messages.length > previousMessagesRef.current.length));
+
+
+    if (isNewMessageFromPartner && !isInitialLoad) {
+      // Check if tab is hidden
+      if (document.hidden) {
+        const notificationSettingsString = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+        if (notificationSettingsString) {
+          try {
+            const settings = JSON.parse(notificationSettingsString);
+            const partnerName = chatDetails.isGroup ? chatDetails.groupName : (chatPartner?.displayName || "User");
+            const senderDisplayName = lastMessage.senderDisplayName || partnerName;
+            const messageIcon = lastMessage.senderPhotoURL || (chatPartner?.photoURL) || '/logo-192.png'; // Use a generic fallback
+
+            // Desktop Notification
+            if (settings.desktopEnabled && Notification.permission === 'granted') {
+              new Notification(senderDisplayName, {
+                body: lastMessage.text,
+                icon: messageIcon,
+              });
+            }
+
+            // Sound Notification
+            if (settings.soundEnabled) {
+              // IMPORTANT: You need to place a sound file (e.g., notification-sound.mp3)
+              // in your `public/sounds/` directory for this to work.
+              const audio = new Audio('/sounds/notification-sound.mp3');
+              audio.play().catch(error => {
+                console.warn("Error playing notification sound. User interaction might be required first or sound file missing:", error);
+              });
+            }
+          } catch (e) {
+            console.error("Error parsing notification settings:", e);
+          }
+        }
+      }
+    }
+    previousMessagesRef.current = [...messages];
+  }, [messages, currentUser, chatDetails, chatPartner]);
+
+
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
     if (newMessage.trim() === "" || !currentUser || !chatDetails) return;
@@ -226,7 +283,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); 
+      handleSetReplyingToMessage(null); // Clear reply state and AI suggestions
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
