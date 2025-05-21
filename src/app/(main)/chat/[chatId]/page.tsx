@@ -199,7 +199,6 @@ export default function IndividualChatPage() {
     const lastMessage = messages[messages.length - 1];
     const isInitialLoad = previousMessagesRef.current.length === 0 && messages.length > 0;
     
-    // Only process if it's not the initial load and the last message is new and from the partner
     const isNewMessageFromPartner = 
       lastMessage.senderId !== currentUser.uid &&
       (!previousMessagesRef.current.find(msg => msg.id === lastMessage.id) || 
@@ -207,7 +206,6 @@ export default function IndividualChatPage() {
 
 
     if (isNewMessageFromPartner && !isInitialLoad) {
-      // Check if tab is hidden
       if (document.hidden) {
         const notificationSettingsString = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
         if (notificationSettingsString) {
@@ -215,9 +213,8 @@ export default function IndividualChatPage() {
             const settings = JSON.parse(notificationSettingsString);
             const partnerName = chatDetails.isGroup ? chatDetails.groupName : (chatPartner?.displayName || "User");
             const senderDisplayName = lastMessage.senderDisplayName || partnerName;
-            const messageIcon = lastMessage.senderPhotoURL || (chatPartner?.photoURL) || '/logo-192.png'; // Use a generic fallback
+            const messageIcon = lastMessage.senderPhotoURL || (chatPartner?.photoURL) || '/logo-192.png'; 
 
-            // Desktop Notification
             if (settings.desktopEnabled && Notification.permission === 'granted') {
               new Notification(senderDisplayName, {
                 body: lastMessage.text,
@@ -225,10 +222,7 @@ export default function IndividualChatPage() {
               });
             }
 
-            // Sound Notification
             if (settings.soundEnabled) {
-              // IMPORTANT: You need to place a sound file (e.g., notification-sound.mp3)
-              // in your `public/sounds/` directory for this to work.
               const audio = new Audio('/sounds/notification-sound.mp3');
               audio.play().catch(error => {
                 console.warn("Error playing notification sound. User interaction might be required first or sound file missing:", error);
@@ -283,7 +277,7 @@ export default function IndividualChatPage() {
         participants: arrayUnion(currentUser.uid) 
       });
       setNewMessage("");
-      handleSetReplyingToMessage(null); // Clear reply state and AI suggestions
+      handleSetReplyingToMessage(null); 
     } catch (error) {
       console.error("Error sending message: ", error);
     } finally {
@@ -375,8 +369,8 @@ export default function IndividualChatPage() {
                 <div
                   className={`max-w-[70%] p-3 rounded-xl shadow ${
                     msg.senderId === currentUser?.uid
-                      ? "bg-primary text-primary-foreground rounded-br-none"
-                      : "bg-card text-card-foreground rounded-bl-none border"
+                      ? "bg-primary text-primary-foreground rounded-xl rounded-bl-none" // Sent: Tail on bottom-left
+                      : "bg-card text-card-foreground rounded-xl rounded-br-none border" // Received: Tail on bottom-right
                   }`}
                 >
                   {msg.replyTo && msg.repliedMessageText && (
