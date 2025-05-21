@@ -1,3 +1,4 @@
+
 // This is now a client component
 "use client";
 
@@ -9,14 +10,31 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { CustomAvatar } from "@/components/common/CustomAvatar";
-import { useAuth } from '@/hooks/useAuth'; // Assuming you might want user data for profile
+import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/use-toast';
+
+const NOTIFICATION_SETTINGS_KEY = 'gongoBongoNotificationSettings';
+
+interface NotificationSettings {
+  desktopEnabled: boolean;
+  emailEnabled: boolean;
+  soundEnabled: boolean;
+}
 
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [isMounted, setIsMounted] = useState(false);
 
-  // Effect to set initial theme from localStorage or system preference
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
+    desktopEnabled: false,
+    emailEnabled: false,
+    soundEnabled: true, // Default sound to true as per image
+  });
+  const [desktopNotificationPermission, setDesktopNotificationPermission] = useState<NotificationPermission>('default');
+
+  // Effect to set initial theme and load notification settings
   useEffect(() => {
     setIsMounted(true);
     const storedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -24,6 +42,17 @@ export default function SettingsPage() {
       setTheme(storedTheme);
     } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       setTheme('dark');
+    }
+
+    // Load notification settings from localStorage
+    const storedNotificationSettings = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+    if (storedNotificationSettings) {
+      setNotificationSettings(JSON.parse(storedNotificationSettings));
+    }
+
+    // Check current desktop notification permission
+    if ('Notification' in window) {
+      setDesktopNotificationPermission(Notification.permission);
     }
   }, []);
 
@@ -40,14 +69,66 @@ export default function SettingsPage() {
     }
   }, [theme, isMounted]);
 
+  // Effect to save notification settings to localStorage
+  useEffect(() => {
+    if (isMounted) {
+      localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(notificationSettings));
+    }
+  }, [notificationSettings, isMounted]);
+
   const handleThemeChange = (checked: boolean) => {
     setTheme(checked ? 'dark' : 'light');
   };
 
+  const handleDesktopNotificationChange = async (checked: boolean) => {
+    if (!('Notification' in window)) {
+      toast({ title: "Unsupported", description: "Desktop notifications are not supported by your browser.", variant: "destructive" });
+      return;
+    }
+
+    if (checked) {
+      if (desktopNotificationPermission === 'granted') {
+        setNotificationSettings(prev => ({ ...prev, desktopEnabled: true }));
+      } else if (desktopNotificationPermission === 'default') {
+        const permission = await Notification.requestPermission();
+        setDesktopNotificationPermission(permission);
+        if (permission === 'granted') {
+          setNotificationSettings(prev => ({ ...prev, desktopEnabled: true }));
+          toast({ title: "Success", description: "Desktop notifications enabled." });
+        } else {
+          toast({ title: "Info", description: "Desktop notifications permission not granted." });
+          setNotificationSettings(prev => ({ ...prev, desktopEnabled: false })); // Ensure it's off if not granted
+        }
+      } else if (desktopNotificationPermission === 'denied') {
+        toast({ title: "Permission Denied", description: "Desktop notifications are blocked. Please enable them in your browser settings.", variant: "destructive" });
+         setNotificationSettings(prev => ({ ...prev, desktopEnabled: false })); // Ensure it's off
+      }
+    } else {
+      setNotificationSettings(prev => ({ ...prev, desktopEnabled: false }));
+    }
+  };
+
+  const handleEmailNotificationChange = (checked: boolean) => {
+    setNotificationSettings(prev => ({ ...prev, emailEnabled: checked }));
+    // Actual email sending logic would be backend-based
+    toast({ title: "Preference Saved", description: `Email notifications ${checked ? 'enabled' : 'disabled'}.`});
+  };
+  
+  const handleSoundNotificationChange = (checked: boolean) => {
+    setNotificationSettings(prev => ({ ...prev, soundEnabled: checked }));
+    toast({ title: "Preference Saved", description: `Sound notifications ${checked ? 'enabled' : 'disabled'}.`});
+  };
+
+
   if (!isMounted) {
-    // Optional: render a loading state or null to avoid hydration issues with theme-dependent rendering
     return null; 
   }
+
+  const isDesktopSwitchDisabled = desktopNotificationPermission === 'denied';
+  // The switch should reflect the stored preference IF permission is granted,
+  // otherwise, it should be off if permission is not granted.
+  const desktopSwitchChecked = desktopNotificationPermission === 'granted' && notificationSettings.desktopEnabled;
+
 
   return (
     <div className="flex flex-col h-full p-4 sm:p-6 md:p-8 bg-background">
@@ -70,7 +151,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="flex flex-col items-center space-y-2">
               <CustomAvatar 
-                src={user?.photoURL || undefined} // Use undefined if null to trigger fallback correctly
+                src={user?.photoURL || undefined} 
                 alt={user?.displayName || user?.email || "User"} 
                 className="h-24 w-24 mb-2" 
                 data-ai-hint="person avatar"
@@ -98,33 +179,46 @@ export default function SettingsPage() {
             </CardTitle>
             <CardDescription>Manage your notification preferences.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6"> {/* Increased spacing for better visual separation */}
             <div className="flex items-center justify-between">
-              <Label htmlFor="desktopNotifications" className="flex flex-col space-y-1">
+              <Label htmlFor="desktopNotifications" className="flex flex-col space-y-1 cursor-pointer">
                 <span>Desktop Notifications</span>
-                <span className="font-normal leading-snug text-muted-foreground">
+                <span className="font-normal leading-snug text-muted-foreground text-xs sm:text-sm">
                   Receive notifications on your computer.
                 </span>
               </Label>
-              <Switch id="desktopNotifications" defaultChecked disabled />
+              <Switch 
+                id="desktopNotifications" 
+                checked={desktopSwitchChecked}
+                onCheckedChange={handleDesktopNotificationChange}
+                disabled={isDesktopSwitchDisabled}
+              />
             </div>
             <div className="flex items-center justify-between">
-              <Label htmlFor="emailNotifications" className="flex flex-col space-y-1">
+              <Label htmlFor="emailNotifications" className="flex flex-col space-y-1 cursor-pointer">
                 <span>Email Notifications</span>
-                <span className="font-normal leading-snug text-muted-foreground">
+                <span className="font-normal leading-snug text-muted-foreground text-xs sm:text-sm">
                   Get important updates via email.
                 </span>
               </Label>
-              <Switch id="emailNotifications" disabled />
+              <Switch 
+                id="emailNotifications" 
+                checked={notificationSettings.emailEnabled}
+                onCheckedChange={handleEmailNotificationChange}
+              />
             </div>
              <div className="flex items-center justify-between">
-              <Label htmlFor="soundNotifications" className="flex flex-col space-y-1">
+              <Label htmlFor="soundNotifications" className="flex flex-col space-y-1 cursor-pointer">
                 <span>Sound Notifications</span>
-                <span className="font-normal leading-snug text-muted-foreground">
+                <span className="font-normal leading-snug text-muted-foreground text-xs sm:text-sm">
                   Play a sound for new messages.
                 </span>
               </Label>
-              <Switch id="soundNotifications" defaultChecked disabled />
+              <Switch 
+                id="soundNotifications" 
+                checked={notificationSettings.soundEnabled}
+                onCheckedChange={handleSoundNotificationChange}
+              />
             </div>
           </CardContent>
         </Card>
@@ -139,7 +233,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <Label htmlFor="darkMode" className="flex items-center gap-2">
+              <Label htmlFor="darkMode" className="flex items-center gap-2 cursor-pointer">
                 {theme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
                 <span>Dark Mode</span>
               </Label>
@@ -150,12 +244,12 @@ export default function SettingsPage() {
               />
             </div>
             <p className="text-sm text-muted-foreground">
-              Automatically switches based on your system settings if no preference is set.
+              Switches theme for your current session.
             </p>
           </CardContent>
         </Card>
         
-        {/* Security Settings (Original Card, moved down for typical grouping) */}
+        {/* Security Settings */}
         <Card className="md:col-span-1">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -173,3 +267,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
